@@ -1,0 +1,4 @@
+<plugin>
+    <name>jdeps</name>
+    <classname>third_party.scala_jdeps.ScalaJdeps</classname>
+</plugin>
