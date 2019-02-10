@@ -8,7 +8,11 @@ load(
     _scala_repl_impl = "scala_repl_impl",
     _scala_test_impl = "scala_test_impl",
 )
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+load(
+    "@bazel_tools//tools/build_defs/repo:http.bzl",
+    "http_file",
+    _http_archive = "http_archive",
+)
 load(
     "@io_bazel_rules_scala//scala:scala_maven_import_external.bzl",
     _scala_maven_import_external = "scala_maven_import_external",
@@ -143,6 +147,13 @@ _common_attrs.update({
             "@io_bazel_rules_scala//third_party/unused_dependency_checker/src/main:unused_dependency_checker",
         ),
         allow_files = [".jar"],
+        mandatory = False,
+    ),
+    "_jdeps_plugin": attr.label(
+        default = Label(
+            "//third_party/scala_jdeps:scala_jdeps",
+        ),
+        #allow_files = [".jar"],
         mandatory = False,
     ),
     "unused_dependency_checker_ignored_targets": attr.label_list(default = []),
@@ -365,8 +376,7 @@ def scala_repositories(
 
     _scala_maven_import_external(
         name = "io_bazel_rules_scala_scala_xml",
-        artifact = "org.scala-lang.modules:scala-xml_{major_version}:{extra_jar_version}"
-            .format(
+        artifact = "org.scala-lang.modules:scala-xml_{major_version}:{extra_jar_version}".format(
             major_version = major_version,
             extra_jar_version = scala_version_extra_jars["scala_xml"]["version"],
         ),
@@ -378,8 +388,7 @@ def scala_repositories(
     _scala_maven_import_external(
         name = "io_bazel_rules_scala_scala_parser_combinators",
         artifact =
-            "org.scala-lang.modules:scala-parser-combinators_{major_version}:{extra_jar_version}"
-                .format(
+            "org.scala-lang.modules:scala-parser-combinators_{major_version}:{extra_jar_version}".format(
                 major_version = major_version,
                 extra_jar_version = scala_version_extra_jars["scala_parser_combinators"]["version"],
             ),
@@ -387,6 +396,16 @@ def scala_repositories(
         licenses = ["notice"],
         server_urls = maven_servers,
     )
+
+    if "com_google_protobuf" not in native.existing_rules():
+        _http_archive(
+            name = "com_google_protobuf",
+            sha256 = "73fdad358857e120fd0fa19e071a96e15c0f23bb25f85d3f7009abfd4f264a2a",
+            strip_prefix = "protobuf-3.6.1.3",
+            urls = [
+                "https://github.com/protocolbuffers/protobuf/archive/v3.6.1.3.tar.gz",
+            ]
+        )
 
     _scala_maven_import_external(
         name = "scalac_rules_protobuf_java",

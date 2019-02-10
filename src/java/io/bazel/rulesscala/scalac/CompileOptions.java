@@ -4,7 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class CompileOptions {
+public class CompileOptions_Z {
   public final String outputName;
   public final String manifestPath;
   public final String[] scalaOpts;

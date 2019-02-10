@@ -1,0 +1,67 @@
+// Copyright 2014 The Bazel Authors. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Definitions for dependency reports.
+
+syntax = "proto3";
+
+package rules_scala;
+
+option java_package = "rules_scala.compileoptions";
+
+message CompileOptions {
+
+  message Resource {
+    string destination = 1;
+    string short_path = 2;
+  }
+
+  enum EnforcementMode {
+    UNKNOWN = 0;
+    ERROR = 1;
+    WARN = 2;
+    OFF = 3;
+  }
+
+  string jar_output = 1;
+  string manifest = 2;
+  repeated string scalac_opts = 3;
+  bool print_compile_time = 4;
+  bool expect_java_output = 5;
+  repeated string plugins = 6;
+  repeated string classpath_jars = 7;
+  repeated string files = 8;
+  repeated string java_files = 9;
+  repeated string source_jars = 10;
+
+  /// ResourceSrcs => (ResourceDests, ResourceShortPaths)
+  map<string, Resource> resource_files = 11;
+
+  string resource_strip_prefix = 12;
+  repeated string resource_jars = 13;
+  repeated string classpath_resource_files = 14;
+  repeated string direct_jars = 15;
+//  repeated string direct_targets = 16;
+//  repeated string ignored_targets = 17;
+//  repeated string indirect_jars = 18;
+//  repeated string indirect_targets = 19;
+  EnforcementMode strict_deps_mode = 20;
+  repeated string strict_deps_ignored_jars = 21;
+  EnforcementMode unused_deps_mode = 22;
+  repeated string unused_deps_ignored_jars = 23;
+  string current_target = 24;
+  string statsfile = 25;
+  string jdeps_output = 26;
+
+}

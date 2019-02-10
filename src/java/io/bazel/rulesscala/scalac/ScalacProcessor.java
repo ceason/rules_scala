@@ -3,7 +3,13 @@ package io.bazel.rulesscala.scalac;
 import io.bazel.rulesscala.jar.JarCreator;
 import io.bazel.rulesscala.worker.GenericWorker;
 import io.bazel.rulesscala.worker.Processor;
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
@@ -12,14 +18,25 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Enumeration;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import org.apache.commons.io.IOUtils;
+import rules_scala.compileoptions.CompileOptionsOuterClass.CompileOptions;
+import rules_scala.compileoptions.CompileOptionsOuterClass.CompileOptions.Resource;
 import scala.tools.nsc.Driver;
 import scala.tools.nsc.MainClass;
 import scala.tools.nsc.reporters.ConsoleReporter;
+
+/*
+TODO:
+  wire up new (proto message based) CompileOptions
+ */
 
 class ScalacProcessor implements Processor {
   /** This is the reporter field for scalac, which we want to access */
@@ -37,24 +54,35 @@ class ScalacProcessor implements Processor {
   @Override
   public void processRequest(List<String> args) throws Exception {
     Path tmpPath = null;
-    try {
-      CompileOptions ops = new CompileOptions(args);
+    if (args.size() != 1) {
+      String msg = String
+          .format("Expected exactly one argument (path to compile options file) but got %d:\n  %s",
+              args.size(), String.join("\n  ", args));
+      throw new IllegalArgumentException(msg);
+    }
+    String opsFile = args.get(0);
+    try (FileInputStream f = new FileInputStream(opsFile)) {
 
-      Path outputPath = FileSystems.getDefault().getPath(ops.outputName);
+      CompileOptions ops = CompileOptions.parseFrom(f);
+      Path outputPath = FileSystems.getDefault().getPath(ops.getJarOutput());
       tmpPath = Files.createTempDirectory(outputPath.getParent(), "tmp");
 
       List<File> jarFiles = extractSourceJars(ops, outputPath.getParent());
       List<File> scalaJarFiles = filterFilesByExtension(jarFiles, ".scala");
       List<File> javaJarFiles = filterFilesByExtension(jarFiles, ".java");
 
-      if (!ops.expectJavaOutput && !javaJarFiles.isEmpty()) {
+      if (!ops.getExpectJavaOutput() && !javaJarFiles.isEmpty()) {
         throw new RuntimeException(
             "Found java files in source jars but expect Java output is set to false");
       }
 
-      String[] scalaSources = collectSrcJarSources(ops.files, scalaJarFiles, javaJarFiles);
+      String[] scalaSources = collectSrcJarSources(ops.getFilesList().toArray(new String[0]), scalaJarFiles, javaJarFiles);
+//      List<String> scalaSources2 = new ArrayList<String>();
+//      scalaSources2.addAll(ops.getFilesList());
+//      scalaSources2.addAll(scalaJarFiles);
+//      scalaSources2.addAll(javaJarFiles)
 
-      String[] javaSources = GenericWorker.appendToString(ops.javaFiles, javaJarFiles);
+      String[] javaSources = GenericWorker.appendToString(ops.getJavaFilesList().toArray(new String[0]), javaJarFiles);
       if (scalaSources.length == 0 && javaSources.length == 0) {
         throw new RuntimeException("Must have input files from either source jars or local files.");
       }
@@ -64,20 +92,20 @@ class ScalacProcessor implements Processor {
        * sources).
        */
       if (scalaSources.length > 0) {
-        compileScalaSources(ops, scalaSources, tmpPath);
+        compileScalaSources(ops, scalaSources, opsFile, tmpPath);
       }
 
       /** Copy the resources */
-      copyResources(ops.resourceFiles, ops.resourceStripPrefix, tmpPath);
+      copyResources(ops.getResourceFilesMap(), ops.getResourceStripPrefix(), tmpPath);
 
       /** Extract and copy resources from resource jars */
-      copyResourceJars(ops.resourceJars, tmpPath);
+      copyResourceJars(ops.getResourceJarsList().toArray(new String[0]), tmpPath);
 
       /** Copy classpath resources to root of jar */
-      copyClasspathResourcesToRoot(ops.classpathResourceFiles, tmpPath);
+      copyClasspathResourcesToRoot(ops.getClasspathResourceFilesList().toArray(new String[0]), tmpPath);
 
       /** Now build the output jar */
-      String[] jarCreatorArgs = {"-m", ops.manifestPath, outputPath.toString(), tmpPath.toString()};
+      String[] jarCreatorArgs = {"-m", ops.getManifest(), outputPath.toString(), tmpPath.toString()};
       JarCreator.main(jarCreatorArgs);
     } finally {
       removeTmp(tmpPath);
@@ -106,7 +134,7 @@ class ScalacProcessor implements Processor {
       throws IOException {
     List<File> sourceFiles = new ArrayList<File>();
 
-    for (String jarPath : opts.sourceJars) {
+    for (String jarPath : opts.getSourceJarsList()) {
       if (jarPath.length() > 0) {
         Path tmpPath = Files.createTempDirectory(tmpParent, "tmp");
         sourceFiles.addAll(extractJar(jarPath, tmpPath.toString(), sourceExtensions));
@@ -168,48 +196,59 @@ class ScalacProcessor implements Processor {
     return !"off".equals(mode);
   }
 
-  private static String[] getPluginParamsFrom(CompileOptions ops) {
-    ArrayList<String> pluginParams = new ArrayList<>(0);
+//  private static String[] getPluginParamsFrom(CompileOptions ops) {
+//    ArrayList<String> pluginParams = new ArrayList<>(0);
+//
+//    if (ops.getStrictDepsMode() != EnforcementMode.OFF) {
+////      String[] indirectTargets = encodeBazelTargets(ops.indirectTargets);
+////      String currentTarget = encodeBazelTarget(ops.currentTarget);
+//
+//      String[] dependencyAnalyzerParams = {
+//        "-P:dependency-analyzer:direct-jars:" + String.join(":", ops.directJars),
+//        "-P:dependency-analyzer:indirect-jars:" + String.join(":", ops.indirectJars),
+//        "-P:dependency-analyzer:indirect-targets:" + String.join(":", indirectTargets),
+//        "-P:dependency-analyzer:mode:" + ops.dependencyAnalyzerMode,
+//        "-P:dependency-analyzer:current-target:" + currentTarget,
+//      };
+//      pluginParams.addAll(Arrays.asList(dependencyAnalyzerParams));
+//    } else if (isModeEnabled(ops.unusedDependencyCheckerMode)) {
+//      String[] directTargets = encodeBazelTargets(ops.directTargets);
+//      String[] ignoredTargets = encodeBazelTargets(ops.ignoredTargets);
+//      String currentTarget = encodeBazelTarget(ops.currentTarget);
+//
+//      String[] unusedDependencyCheckerParams = {
+//        "-P:unused-dependency-checker:direct-jars:" + String.join(":", ops.directJars),
+//        "-P:unused-dependency-checker:direct-targets:" + String.join(":", directTargets),
+//        "-P:unused-dependency-checker:ignored-targets:" + String.join(":", ignoredTargets),
+//        "-P:unused-dependency-checker:mode:" + ops.unusedDependencyCheckerMode,
+//        "-P:unused-dependency-checker:current-target:" + currentTarget,
+//      };
+//      pluginParams.addAll(Arrays.asList(unusedDependencyCheckerParams));
+//    }
+//
+//    return pluginParams.toArray(new String[pluginParams.size()]);
+//  }
 
-    if (isModeEnabled(ops.dependencyAnalyzerMode)) {
-      String[] indirectTargets = encodeBazelTargets(ops.indirectTargets);
-      String currentTarget = encodeBazelTarget(ops.currentTarget);
-
-      String[] dependencyAnalyzerParams = {
-        "-P:dependency-analyzer:direct-jars:" + String.join(":", ops.directJars),
-        "-P:dependency-analyzer:indirect-jars:" + String.join(":", ops.indirectJars),
-        "-P:dependency-analyzer:indirect-targets:" + String.join(":", indirectTargets),
-        "-P:dependency-analyzer:mode:" + ops.dependencyAnalyzerMode,
-        "-P:dependency-analyzer:current-target:" + currentTarget,
-      };
-      pluginParams.addAll(Arrays.asList(dependencyAnalyzerParams));
-    } else if (isModeEnabled(ops.unusedDependencyCheckerMode)) {
-      String[] directTargets = encodeBazelTargets(ops.directTargets);
-      String[] ignoredTargets = encodeBazelTargets(ops.ignoredTargets);
-      String currentTarget = encodeBazelTarget(ops.currentTarget);
-
-      String[] unusedDependencyCheckerParams = {
-        "-P:unused-dependency-checker:direct-jars:" + String.join(":", ops.directJars),
-        "-P:unused-dependency-checker:direct-targets:" + String.join(":", directTargets),
-        "-P:unused-dependency-checker:ignored-targets:" + String.join(":", ignoredTargets),
-        "-P:unused-dependency-checker:mode:" + ops.unusedDependencyCheckerMode,
-        "-P:unused-dependency-checker:current-target:" + currentTarget,
-      };
-      pluginParams.addAll(Arrays.asList(unusedDependencyCheckerParams));
-    }
-
-    return pluginParams.toArray(new String[pluginParams.size()]);
-  }
-
-  private static void compileScalaSources(CompileOptions ops, String[] scalaSources, Path tmpPath)
+  private static void compileScalaSources(CompileOptions ops, String[] scalaSources, String opsFile, Path tmpPath)
       throws IllegalAccessException {
 
-    String[] pluginParams = getPluginParamsFrom(ops);
+    List<String> cArgs = new ArrayList<String>();
+    cArgs.addAll(ops.getScalacOptsList());
+    cArgs.addAll(ops.getPluginsList());
+    cArgs.add("-classpath");
+    cArgs.add(String.join(File.pathSeparator, ops.getClasspathJarsList()));
+    cArgs.add("-d");
+    cArgs.add(tmpPath.toString());
+    cArgs.add("-P:scala-jdeps:compile-options:" + opsFile);
+    cArgs.addAll(Arrays.asList(scalaSources));
+    String[] compilerArgs = cArgs.toArray(new String[0]);
 
-    String[] constParams = {"-classpath", ops.classpath, "-d", tmpPath.toString()};
-
-    String[] compilerArgs =
-        GenericWorker.merge(ops.scalaOpts, ops.pluginArgs, constParams, pluginParams, scalaSources);
+//    String[] pluginParams = getPluginParamsFrom(ops);
+//
+//    String[] constParams = {"-classpath", ops.classpath, "-d", tmpPath.toString()};
+//
+//    String[] compilerArgs =
+//        GenericWorker.merge(ops.scalaOpts, ops.pluginArgs, constParams, pluginParams, scalaSources);
 
     MainClass comp = new MainClass();
     long start = System.currentTimeMillis();
@@ -223,15 +262,15 @@ class ScalacProcessor implements Processor {
       }
     }
     long stop = System.currentTimeMillis();
-    if (ops.printCompileTime) {
+    if (ops.getPrintCompileTime()) {
       System.err.println("Compiler runtime: " + (stop - start) + "ms.");
     }
 
     try {
       Files.write(
-          Paths.get(ops.statsfile), Arrays.asList("build_time=" + Long.toString(stop - start)));
+          Paths.get(ops.getStatsfile()), Arrays.asList("build_time=" + Long.toString(stop - start)));
     } catch (IOException ex) {
-      throw new RuntimeException("Unable to write statsfile to " + ops.statsfile, ex);
+      throw new RuntimeException("Unable to write statsfile to " + ops.getStatsfile(), ex);
     }
 
     ConsoleReporter reporter = (ConsoleReporter) reporterField.get(comp);
@@ -270,7 +309,7 @@ class ScalacProcessor implements Processor {
     for (Entry<String, Resource> e : resources.entrySet()) {
       Path source = Paths.get(e.getKey());
       Resource resource = e.getValue();
-      Path shortPath = Paths.get(resource.shortPath);
+      Path shortPath = Paths.get(resource.getShortPath());
       String dstr;
       // Check if we need to modify resource destination path
       if (!"".equals(resourceStripPrefix)) {
@@ -285,7 +324,7 @@ class ScalacProcessor implements Processor {
          */
         dstr = getResourcePath(shortPath, resourceStripPrefix);
       } else {
-        dstr = resource.destination;
+        dstr = resource.getDestination();
       }
       if (dstr.charAt(0) == '/') {
         // we don't want to copy to an absolute destination

@@ -136,7 +136,152 @@ def _expand_location(ctx, flags):
 def _join_path(args, sep = ","):
     return sep.join([f.path for f in args])
 
-def compile_scala(
+def _resource_file_args(item):
+    return "{src}:{dest}:{short_path}".format(
+        src = item.path,
+        dest = _adjust_resources_path_by_default_prefixes(item.short_path)[1],
+        short_path = item.short_path,
+    )
+
+def compile_scala_new(
+        ctx,
+        target_label,
+        output,
+        manifest,
+        statsfile,
+        sources,
+        cjars,
+        all_srcjars,
+        transitive_compile_jars,
+        plugins,
+        resource_strip_prefix,
+        resources,
+        resource_jars,
+        labels,
+        in_scalacopts,
+        print_compile_time,
+        expect_java_output,
+        scalac_jvm_flags,
+        scalac,
+        unused_dependency_checker_mode = "off",
+        unused_dependency_checker_ignored_targets = []):
+    tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
+
+    # compile action inputs which we'll accumulate
+    input_files = []
+    input_depsets = []
+
+    # compiler config file
+    args = ctx.actions.args()
+    compileopts_file = ctx.actions.declare_file("%s_scalac_compileopts.bin" % target_label.name, sibling = output)
+    args.add(compileopts_file)
+    input_files += [compileopts_file]
+
+    # compiler is invoked with a single argument which points to the path of its compileopts file.
+    argsfile = ctx.actions.declare_file("%s_scalac_args.txt" % target_label.name, sibling = output)
+    ctx.actions.write(argsfile, compileopts_file.path)
+    input_files += [argsfile]
+
+    # add all relevant args (and files, as appropriate)
+    plugins = _collect_plugin_paths(plugins)
+    if plugins:
+        args.add("--plugins", plugins)
+        input_depsets += [plugins]
+
+    # add classpath jars
+    if cjars:
+        args.add("--classpath_jars", cjars)
+        input_depsets += [cjars]
+
+    if expect_java_output:
+        args.add("--expect_java_output")
+
+    # /META-INF/MANIFEST.MF
+    args.add("--manifest", manifest)
+    input_files += [manifest]
+
+    # resource stuff
+    if resources:
+        args.add_all("--resource_files", resources, map_each = _resource_file_args)
+        input_depsets += [resources]
+    if resource_jars:
+        args.add_all("--resource_jars", resource_jars)
+        input_depsets += [resource_jars]
+
+    if resource_strip_prefix:
+        args.add("--resource_strip_prefix", resource_strip_prefix)
+    if hasattr(ctx.files, "classpath_resources"):
+        args.add_all("--classpath_resource_files", ctx.files.classpath_resources)
+        input_depsets += [ctx.files.classpath_resources]
+
+    if all_srcjars:
+        args.add_all("--source_jars", all_srcjars)
+
+    # TODO: unused_dependency_checker_ignored_targets
+
+    args.add("--current_target", str(target_label))
+
+    # turn off if set to default, to preserve existing behavior
+    strict_deps = ctx.fragments.java.strict_java_deps
+    if strict_deps == "default":
+        strict_deps = "off"
+
+    args.add("--strict_deps_mode", strict_deps)
+    args.add("--unused_deps_mode", unused_dependency_checker_mode)
+    args.add("--scalac_opts", tc.scalacopts)
+    args.add("--scalac_opts", in_scalacopts)
+    if print_compile_time:
+        args.add("--print_compile_time")
+
+    # compilation outputs
+    args.add("--output_jar", output)
+    args.add("--statsfile", statsfile)
+
+    # build the compiler opts file from the args
+    ctx.actions.run(
+        inputs = [],
+        outputs = [compileopts_file],
+        executable = tc.compile_opts_parser.files_to_run.executable,
+        mnemonic = "ScalacCompileOpts",
+        progress_message = "scala compile opts %s" % target_label,
+        arguments = [args],
+        tools = tc.compile_opts_parser.default_runfiles.files,
+    )
+
+    for f in input_files:
+        print(type(f))
+    for f in input_depsets:
+        print(type(f))
+
+    # invoke the compiler with the args/opts file
+    ctx.actions.run(
+        inputs = depset(direct = input_files, transitive = input_depsets),
+        outputs = [
+            output,
+            statsfile,
+        ],
+        executable = scalac.files_to_run.executable,
+#        input_manifests = scalac_input_manifests,
+        tools = scalac.default_runfiles.files,
+        mnemonic = "Scalac",
+        progress_message = "scala %s" % target_label,
+        execution_requirements = {"supports-workers": "1"},
+        #  when we run with a worker, the `@argfile.path` is removed and passed
+        #  line by line as arguments in the protobuf. In that case,
+        #  the rest of the arguments are passed to the process that
+        #  starts up and stays resident.
+
+        # In either case (worker or not), they will be jvm flags which will
+        # be correctly handled since the executable is a jvm app that will
+        # consume the flags on startup.
+        arguments = [
+            "--jvm_flag=%s" % f
+            for f in _expand_location(ctx, scalac_jvm_flags)
+        ] + ["@" + argsfile.path],
+    )
+
+
+def compile_scala_old(
         ctx,
         target_label,
         output,
@@ -316,6 +461,9 @@ StatsfileOutput: {statsfile_output}
             for f in _expand_location(ctx, scalac_jvm_flags)
         ] + ["@" + argfile.path],
     )
+
+#compile_scala = compile_scala_old
+compile_scala = compile_scala_old
 
 def _interim_java_provider_for_java_compilation(scala_output):
     return java_common.create_provider(

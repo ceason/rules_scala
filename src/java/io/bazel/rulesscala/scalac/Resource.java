@@ -1,6 +1,6 @@
 package io.bazel.rulesscala.scalac;
 
-public class Resource {
+public class Resource_Z {
   public final String destination;
   public final String shortPath;
 
