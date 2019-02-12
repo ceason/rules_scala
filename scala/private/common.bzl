@@ -13,11 +13,24 @@ def impl_common(
         use_ijar = False):
     tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
 
-    # TODO ctx.outputs.jar
-    # TODO ctx.outputs.manifest
+    # ctx.outputs.jar
+    # ctx.outputs.manifest
     # ctx.outputs.statsfile
     # ctx.outputs.jdeps
     # ctx.outputs.srcjar
+
+    # not sure making the manifest available as a separate thing makes sense,
+    # but doing it anyway to maintain existing behavior
+    ctx.actions.run_shell(
+        inputs = [ctx.outputs.jar],
+        outputs = [ctx.outputs.manifest],
+        command = """#!/usr/bin/env bash
+        set -euo pipefail
+        jar=$1; shift
+        out=$1; shift
+        unzip -p "$jar" META-INF/MANIFEST.MF > "$out"
+        """
+    )
 
     java_common.pack_sources(
         ctx.actions,
@@ -51,7 +64,7 @@ def impl_common(
     tc.pack_jar(
         ctx,
         output = ctx.outputs.jar,
-        **packjar_kwargs,
+        **packjar_kwargs
     )
 
     if use_ijar:
@@ -70,14 +83,17 @@ def impl_common(
         )
 
     default_info = DefaultInfo(
-        files = depset(direct=[ctx.outputs.jar])
+        files = depset(direct = [ctx.outputs.jar]),
+        runfiles = ctx.runfiles(collect_default = True),
     )
     java_info = JavaInfo(
         output_jar = ctx.outputs.jar,
         compile_jar = compile_jar,
         source_jar = ctx.outputs.srcjar,
         neverlink = ctx.attr.neverlink,
-        deps = [d[JavaInfo] for d in ctx.attr.deps]
+        deps = [d[JavaInfo] for d in ctx.attr.deps],
+        exports = [d[JavaInfo] for d in ctx.attr.exports],
+        jdeps = ctx.outputs.jdeps,
     )
 
     return struct(
