@@ -1,18 +1,25 @@
 package io.bazel.rulesscala.scalac;
 
-import io.bazel.rulesscala.jar.JarCreator;
 import io.bazel.rulesscala.worker.GenericWorker;
 import io.bazel.rulesscala.worker.Processor;
-import java.io.*;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Field;
-import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Enumeration;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -22,7 +29,10 @@ import scala.tools.nsc.MainClass;
 import scala.tools.nsc.reporters.ConsoleReporter;
 
 class ScalacProcessor implements Processor {
-  /** This is the reporter field for scalac, which we want to access */
+
+  /**
+   * This is the reporter field for scalac, which we want to access
+   */
   private static Field reporterField;
 
   static {
@@ -36,51 +46,33 @@ class ScalacProcessor implements Processor {
 
   @Override
   public void processRequest(List<String> args) throws Exception {
-    Path tmpPath = null;
+    CompileOptions ops = new CompileOptions(args);
+    MainClass comp = new MainClass();
+    List<String> compilerArgs = new ArrayList();
+    compilerArgs.addAll(ops.scalacOpts);
+    compilerArgs.addAll(ops.sources);
+    long start = System.currentTimeMillis();
     try {
-      CompileOptions ops = new CompileOptions(args);
-
-      Path outputPath = FileSystems.getDefault().getPath(ops.outputName);
-      tmpPath = Files.createTempDirectory(outputPath.getParent(), "tmp");
-
-      List<File> jarFiles = extractSourceJars(ops, outputPath.getParent());
-      List<File> scalaJarFiles = filterFilesByExtension(jarFiles, ".scala");
-      List<File> javaJarFiles = filterFilesByExtension(jarFiles, ".java");
-
-      if (!ops.expectJavaOutput && !javaJarFiles.isEmpty()) {
-        throw new RuntimeException(
-            "Found java files in source jars but expect Java output is set to false");
+      comp.process(compilerArgs.toArray(new String[0]));
+    } catch (Throwable ex) {
+      if (ex.toString().contains("scala.reflect.internal.Types$TypeError")) {
+        throw new RuntimeException("Build failure with type error", ex);
+      } else {
+        throw ex;
       }
-
-      String[] scalaSources = collectSrcJarSources(ops.files, scalaJarFiles, javaJarFiles);
-
-      String[] javaSources = GenericWorker.appendToString(ops.javaFiles, javaJarFiles);
-      if (scalaSources.length == 0 && javaSources.length == 0) {
-        throw new RuntimeException("Must have input files from either source jars or local files.");
+    }
+    long duration = System.currentTimeMillis() - start;
+    if (ops.printCompileTime) {
+      System.err.println("Compiler runtime: " + duration + "ms.");
+    }
+    if (ops.outputStatsfile != null) {
+      try {
+        Files.write(
+            Paths.get(ops.outputStatsfile),
+            Arrays.asList("build_time=" + duration));
+      } catch (IOException ex) {
+        throw new RuntimeException("Unable to write statsfile to " + ops.outputStatsfile, ex);
       }
-
-      /**
-       * Compile scala sources if available (if there are none, we will simply compile java
-       * sources).
-       */
-      if (scalaSources.length > 0) {
-        compileScalaSources(ops, scalaSources, tmpPath);
-      }
-
-      /** Copy the resources */
-      copyResources(ops.resourceFiles, ops.resourceStripPrefix, tmpPath);
-
-      /** Extract and copy resources from resource jars */
-      copyResourceJars(ops.resourceJars, tmpPath);
-
-      /** Copy classpath resources to root of jar */
-      copyClasspathResourcesToRoot(ops.classpathResourceFiles, tmpPath);
-
-      /** Now build the output jar */
-      String[] jarCreatorArgs = {"-m", ops.manifestPath, outputPath.toString(), tmpPath.toString()};
-      JarCreator.main(jarCreatorArgs);
-    } finally {
-      removeTmp(tmpPath);
     }
   }
 
@@ -106,8 +98,8 @@ class ScalacProcessor implements Processor {
       throws IOException {
     List<File> sourceFiles = new ArrayList<File>();
 
-    for (String jarPath : opts.sourceJars) {
-      if (jarPath.length() > 0) {
+    for (String jarPath : opts.sources) {
+      if (jarPath.endsWith(".srcjar")) {
         Path tmpPath = Files.createTempDirectory(tmpParent, "tmp");
         sourceFiles.addAll(extractJar(jarPath, tmpPath.toString(), sourceExtensions));
       }
@@ -126,7 +118,9 @@ class ScalacProcessor implements Processor {
       JarEntry file = e.nextElement();
       String thisFileName = file.getName();
       // we don't bother to extract non-scala/java sources (skip manifest)
-      if (extensions != null && !matchesFileExtensions(thisFileName, extensions)) continue;
+      if (extensions != null && !matchesFileExtensions(thisFileName, extensions)) {
+        continue;
+      }
       File f = new File(outputFolder + File.separator + file.getName());
 
       if (file.isDirectory()) { // if its a directory, create it

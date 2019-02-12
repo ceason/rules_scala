@@ -1,5 +1,94 @@
 load("@io_bazel_rules_scala//scala:jars_to_labels.bzl", "JarsToLabelsInfo")
 
+# Does the common recipe, using ctx.attrs directly
+# Returns struct with legacy providers & new provider format
+def impl_common(
+        ctx,
+
+        # list[File]
+        # ?depset[File] ?? <-maybe this instead?
+        deps_enforcer_ignored_jars = [],
+
+        # bool
+        use_ijar = False):
+    tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
+
+    # TODO ctx.outputs.jar
+    # TODO ctx.outputs.manifest
+    # ctx.outputs.statsfile
+    # ctx.outputs.jdeps
+    # ctx.outputs.srcjar
+
+    java_common.pack_sources(
+        ctx.actions,
+        ctx.outputs.srcjar,
+        sources = [f for f in ctx.files.srcs if not f.endswith(".srcjar")],
+        source_jars = [f for f in ctx.files.srcs if f.endswith(".srcjar")],
+        ctx.attr._java_toolchain,
+        ctx.attr._host_javabase,
+    )
+
+    scalac_output = ctx.actions.declare_file("%s-class.jar" % ctx.label.name)
+
+    # compile stuff
+    tc.compile(
+        ctx,
+        output = scalac_output,
+        output_statsfile = ctx.outputs.statsfile,
+        output_jdeps = ctx.outputs.jdeps,
+        source_files = [f for f in ctx.files.srcs if not f.endswith(".srcjar")],
+        source_jars = [f for f in ctx.files.srcs if f.endswith(".srcjar")],
+    )
+
+    # pack the compiled jar with resources
+    packjar_kwargs = {}
+    if hasattr(ctx.attr, "main_class"):
+        packjar_kwargs["main_class"] = ctx.attr.main_class
+    if hasattr(ctx.attr, "classpath_resources"):
+        packjar_kwargs["classpath_resources"] = ctx.attr.classpath_resources
+    if hasattr(ctx.attr, "resource_strip_prefix"):
+        packjar_kwargs["resource_strip_prefix"] = ctx.attr.resource_strip_prefix
+    tc.pack_jar(
+        ctx,
+        output = ctx.outputs.jar,
+        **packjar_kwargs,
+    )
+
+    if use_ijar:
+        compile_jar = java_common.run_ijar(
+            ctx.actions,
+            scalac_output,
+            target_label = ctx.label,
+            ctx._java_toolchain,
+        )
+    else:
+        compile_jar = java_common.stamp_jar(
+            ctx.actions,
+            scalac_output,
+            target_label = ctx.label,
+            ctx._java_toolchain,
+        )
+
+    default_info = DefaultInfo(
+        files = depset(direct=[ctx.outputs.jar])
+    )
+    java_info = JavaInfo(
+        output_jar = ctx.outputs.jar,
+        compile_jar = compile_jar,
+        source_jar = ctx.outputs.srcjar,
+        neverlink = ctx.attr.neverlink,
+        deps = [d[JavaInfo] for d in ctx.attr.deps]
+    )
+
+    return struct(
+        java_info = java_info,
+        default_info = default_info,
+        providers = [
+            java_info,
+            default_info,
+        ],
+    )
+
 def write_manifest(ctx):
     # TODO(bazel-team): I don't think this classpath is what you want
     manifest = "Class-Path: \n"
@@ -10,7 +99,6 @@ def write_manifest(ctx):
         manifest += "Main-Class: %s\n" % ctx.attr.main_class
 
     ctx.actions.write(output = ctx.outputs.manifest, content = manifest)
-
 
 def collect_srcjars(targets):
     srcjars = []

@@ -4,26 +4,65 @@ load(
     _ScalacProvider = "ScalacProvider",
 )
 
-def _compile(
+# Returns File (of unpacked directory)
+def _unpack_jar(
         ctx,
+        # File
+        jar = None):  #
+    # unpack the jar in a directory of "_scalac/%{jarname}_unpacked"
+    # ? also make sure output dir is deleted/clean when unpacking??
+    pass
 
-        # bool
-        use_ijar = False,
-        neverlink = False,
+# Wrapper for @bazel_tools//src/tools/singlejar
+# Use to combine resources & compiled sources
+# flag docs @
+#   https://github.com/bazelbuild/bazel/blob/ce714f8a1d93c540257d237144c88769251a0d62/src/tools/singlejar/options.cc#L36
+def _pack_jar(
+        ctx,
+        # File
+        output = None,
 
         # string
         main_class = None,
-        resource_strip_prefix = None,
+        resource_strip_prefix = "",
+
+        # list[File]
+        resources = [],
+        classpath_resources = [],
+        jars = [],  # (resource jars *and* compilation output jars)
+
+        # list[depset[File]]
+        transitive_jars = []):
+    # set resource paths per:
+    #  https://docs.bazel.build/versions/master/be/java.html#java_library
+
+    pass
+
+# helps filter inputs to scalac (eg unneeded files from extracted srcjars)
+def _filter_scalac_inputs(file):
+    if file.endswith(".scala") or file.endswith(".java"):
+        return file.path
+    else:
+        return []
+
+def _filter_javac_inputs(file):
+    if file.endswith(".java"):
+        return file.path
+    else:
+        return []
+
+
+
+def _compile(
+        ctx,
 
         # list[File]
         source_jars = [],
         source_files = [],
-        resources = [],
-        classpath_resources = [],
 
         # File
         output = None,
-        output_source_jar = None,
+        #        output_source_jar = None,
         output_statsfile = None,
         output_jdeps = None,
 
@@ -33,7 +72,7 @@ def _compile(
 
         # list[JavaInfo]
         deps = [],
-        exports = [],
+        #        exports = [],
         plugins = [],
 
         # off/error/warn
@@ -50,6 +89,19 @@ def _compile(
     args = ctx.actions.args()
     args.use_param_file("@%s", use_always = True)  # required for 'worker' strategy
     args.set_param_file_format("multiline")
+
+    srcjar_dirs = []
+
+    # unpack srcjars if there are any
+    #  each jar is unpacked to directory of "_scalac/%{jarname}_unpacked"
+    # ? also make sure output dir is deleted/clean when unpacking??
+    for srcjar in source_jars:
+        pass
+    args.add_all("--sources", srcjar_dirs, expand_directories = True, map_each = _filter_scalac_inputs)
+    input += srcjar_dirs
+
+    args.add_all("--sources", source_files)
+    input += source_files
 
     # do this stuff if jdeps plugin is present
     if hasattr(ctx.attr, "_scalac_jdeps_plugin"):
@@ -133,12 +185,12 @@ def _compile(
 
     return JavaInfo(
         output_jar = output,
-#        compile_jar = output,
+        #        compile_jar = output,
         source_jar = "???",
-#        neverlink = neverlink,
-#        deps = deps,
-#        runtime_deps = "???",
-#        exports = "???",
+        #        neverlink = neverlink,
+        #        deps = deps,
+        #        runtime_deps = "???",
+        #        exports = "???",
         jdeps = output_jdeps,
     )
 
@@ -158,6 +210,8 @@ def _scala_toolchain_impl(ctx):
         scalac_provider_attr = ctx.attr.scalac_provider_attr,
         unused_dependency_checker_mode = ctx.attr.unused_dependency_checker_mode,
         compile = _compile,
+        pack_jar = _pack_jar,
+        unpack_jar = _unpack_jar,
         default_strict_deps_mode = default_strict_deps,
         default_unused_deps_mode = "warn",
         scalac = ctx.attr._scalac,

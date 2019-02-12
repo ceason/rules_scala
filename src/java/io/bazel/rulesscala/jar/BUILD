@@ -4,6 +4,9 @@ java_library(
         "JarCreator.java",
         "JarHelper.java",
     ],
+    resources = [
+      "asdf.txt"
+    ],
     visibility = ["//visibility:public"],
 )
 
