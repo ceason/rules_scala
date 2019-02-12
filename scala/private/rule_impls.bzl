@@ -168,100 +168,141 @@ def compile_scala_new(
     tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
 
     # compile action inputs which we'll accumulate
-    input_files = []
-    input_depsets = []
+    input = []
 
-    # compiler config file
+    # args, which must use a file since 'worker' requires it
     args = ctx.actions.args()
-    compileopts_file = ctx.actions.declare_file("%s_scalac_compileopts.bin" % target_label.name, sibling = output)
-    args.add(compileopts_file)
-    input_files += [compileopts_file]
+    args.use_param_file("@%s", use_always = True)
+    args.set_param_file_format("multiline")
 
-    # compiler is invoked with a single argument which points to the path of its compileopts file.
-    argsfile = ctx.actions.declare_file("%s_scalac_args.txt" % target_label.name, sibling = output)
-    ctx.actions.write(argsfile, compileopts_file.path)
-    input_files += [argsfile]
+    # First we write a file containing all the jars in the classpath.
+    # Note: this should be the only transitive data we need.
+    classpath_file = ctx.actions.declare_file("%s_compiler.classpath" % target_label.name, sibling = output)
+    cp_args = ctx.actions.args()
+    cp_args.add(classpath_file)
+    cp_args.add_all(cjars)
+    ctx.actions.run_shell(
+        inputs = [],
+        outputs = [classpath_file],
+        arguments = [cp_args],
+        progress_message = "Writing classpath entries to file",
+#        command = """printf "%s\n" "${@:1}" > "$1" """,
+        command = """#!/usr/bin/env bash
+        set -euo pipefail
+        out=$1; shift
+        printf "%s\n" "$@" > "$out"
+"""
+    )
+    input += [classpath_file]
+    args.add(classpath_file, format = "ClasspathFile: %s")
 
-    # add all relevant args (and files, as appropriate)
+    # Plugins
     plugins = _collect_plugin_paths(plugins)
-    if plugins:
-        args.add("--plugins", plugins)
-        input_depsets += [plugins]
+    args.add_joined(plugins, format_joined = "Plugins: %s", join_with = ",")
+    input += [plugins]
 
-    # add classpath jars
-    if cjars:
-        args.add("--classpath_jars", cjars)
-        input_depsets += [cjars]
+    # Classpath
+    compiler_classpath_jars = depset(transitive = [cjars, transitive_compile_jars])
+    args.add_joined(compiler_classpath_jars, format_joined = "Classpath: %s", join_with = ctx.configuration.host_path_separator)
+    input += [compiler_classpath_jars]
 
+    # ExpectJavaOutput
     if expect_java_output:
-        args.add("--expect_java_output")
+        args.add("ExpectJavaOutput: true")
 
-    # /META-INF/MANIFEST.MF
-    args.add("--manifest", manifest)
-    input_files += [manifest]
+    # Manifest
+    args.add(manifest, format = "Manifest: %s")
+    input += [manifest]
 
-    # resource stuff
-    if resources:
-        args.add_all("--resource_files", resources, map_each = _resource_file_args)
-        input_depsets += [resources]
-    if resource_jars:
-        args.add_all("--resource_jars", resource_jars)
-        input_depsets += [resource_jars]
+    # Resource{Srcs,ShortPaths,Dests}
+    args.add_joined(resources, format_joined = "ResourceSrcs: %s", join_with = ",")
+    args.add_joined([
+        f.short_path
+        for f in resources
+    ], format_joined = "ResourceShortPaths: %s", join_with = ",")
+    args.add_joined([
+        _adjust_resources_path_by_default_prefixes(f.short_path)[1]
+        for f in resources
+    ], format_joined = "ResourceDests: %s", join_with = ",")
+    input += resources
 
-    if resource_strip_prefix:
-        args.add("--resource_strip_prefix", resource_strip_prefix)
+    # ResourceJars
+    args.add_joined(resource_jars, format_joined = "ResourceJars: %s", join_with = ",")
+    input += resource_jars
+
+    # ResourceStripPrefix
+    args.add(resource_strip_prefix, format = "ResourceStripPrefix: %s")
+
+    # PrintCompileTime
+    if print_compile_time:
+        args.add("RPrintCompileTime: true")
+
+    # ClasspathResourceSrcs
     if hasattr(ctx.files, "classpath_resources"):
-        args.add_all("--classpath_resource_files", ctx.files.classpath_resources)
-        input_depsets += [ctx.files.classpath_resources]
+        args.add_joined(ctx.files.classpath_resources, format_joined = "ClasspathResourceSrcs: %s", join_with = ",")
+        input += ctx.files.classpath_resources
 
-    if all_srcjars:
-        args.add_all("--source_jars", all_srcjars)
+    # SourceJars
+    args.add_joined(all_srcjars, format_joined = "SourceJars: %s", join_with = ",")
+    input += [all_srcjars]
 
-    # TODO: unused_dependency_checker_ignored_targets
+    # CurrentTarget
+    args.add(str(target_label), format = "CurrentTarget: %s")
 
-    args.add("--current_target", str(target_label))
+    # Files
+    args.add_joined(sources, format_joined = "Files: %s", join_with = ",")
+    input += sources
 
-    # turn off if set to default, to preserve existing behavior
+    # ScalacOpts
+    args.add_joined(tc.scalacopts + in_scalacopts, format_joined = "ScalacOpts: %s", join_with = ",")
+
+    # DependencyAnalyzerMode
+    strict_deps = ctx.fragments.java.strict_java_deps
+    if strict_deps == "default":
+        strict_deps = "off"
+    args.add(strict_deps, format = "DependencyAnalyzerMode: %s")
+
+    # UnusedDependencyCheckerMode
+    args.add(unused_dependency_checker_mode, format = "UnusedDependencyCheckerMode: %s")
+
+    # IgnoredTargets
+    args.add_joined(unused_dependency_checker_ignored_targets, format_joined = "IgnoredTargets: %s", join_with = ",")
+
+    # DirectJars
+    args.add_joined(cjars, format_joined = "DirectJars: %s", join_with = ",")
+    input += [cjars]
+
     strict_deps = ctx.fragments.java.strict_java_deps
     if strict_deps == "default":
         strict_deps = "off"
 
-    args.add("--strict_deps_mode", strict_deps)
-    args.add("--unused_deps_mode", unused_dependency_checker_mode)
-    args.add("--scalac_opts", tc.scalacopts)
-    args.add("--scalac_opts", in_scalacopts)
-    if print_compile_time:
-        args.add("--print_compile_time")
-
     # compilation outputs
-    args.add("--output_jar", output)
-    args.add("--statsfile", statsfile)
+    args.add(output, format = "JarOutput: %s")
+    args.add(statsfile, format = "StatsfileOutput: %s")
 
-    # build the compiler opts file from the args
-    ctx.actions.run(
-        inputs = [],
-        outputs = [compileopts_file],
-        executable = tc.compile_opts_parser.files_to_run.executable,
-        mnemonic = "ScalacCompileOpts",
-        progress_message = "scala compile opts %s" % target_label,
-        arguments = [args],
-        tools = tc.compile_opts_parser.default_runfiles.files,
-    )
+#    in_direct = [i for i in input if type(i) != "depset"]
+#    in_trans = [i for i in input if type(i) == "depset"]
+#    wtf = depset(
+#        direct = in_direct,
+#        transitive=in_trans
+#    )
+#    for i in in_trans:
+#        print(type(i))
+#        print(i)
 
-    for f in input_files:
-        print(type(f))
-    for f in input_depsets:
-        print(type(f))
 
     # invoke the compiler with the args/opts file
     ctx.actions.run(
-        inputs = depset(direct = input_files, transitive = input_depsets),
+        inputs = depset(
+            direct = [i for i in input if type(i) != "depset"],
+            transitive = [i for i in input if type(i) == "depset"],
+        ),
         outputs = [
             output,
             statsfile,
         ],
         executable = scalac.files_to_run.executable,
-#        input_manifests = scalac_input_manifests,
+        #        input_manifests = scalac_input_manifests,
         tools = scalac.default_runfiles.files,
         mnemonic = "Scalac",
         progress_message = "scala %s" % target_label,
@@ -277,9 +318,9 @@ def compile_scala_new(
         arguments = [
             "--jvm_flag=%s" % f
             for f in _expand_location(ctx, scalac_jvm_flags)
-        ] + ["@" + argsfile.path],
+            #        ] + ["@" + argsfile.path],
+        ] + [args],
     )
-
 
 def compile_scala_old(
         ctx,
@@ -330,10 +371,10 @@ def compile_scala_old(
         current_target = str(target_label)
 
         optional_scalac_args = """
-DirectJars: {direct_jars}
+    DirectJars: {direct_jars}
 IndirectJars: {indirect_jars}
 IndirectTargets: {indirect_targets}
-CurrentTarget: {current_target}
+    CurrentTarget: {current_target}
         """.format(
             direct_jars = direct_jars,
             indirect_jars = indirect_jars,
@@ -355,10 +396,10 @@ CurrentTarget: {current_target}
         current_target = str(target_label)
 
         optional_scalac_args = """
-DirectJars: {direct_jars}
+    DirectJars: {direct_jars}
 DirectTargets: {direct_targets}
-IgnoredTargets: {ignored_targets}
-CurrentTarget: {current_target}
+    IgnoredTargets: {ignored_targets}
+    CurrentTarget: {current_target}
         """.format(
             direct_jars = direct_jars,
             direct_targets = direct_targets,
@@ -376,24 +417,24 @@ CurrentTarget: {current_target}
     scalacopts = toolchain.scalacopts + in_scalacopts
 
     scalac_args = """
-Classpath: {cp}
-ClasspathResourceSrcs: {classpath_resource_src}
-Files: {files}
-JarOutput: {out}
-Manifest: {manifest}
-Plugins: {plugin_arg}
-PrintCompileTime: {print_compile_time}
-ExpectJavaOutput: {expect_java_output}
-ResourceDests: {resource_dest}
-ResourceJars: {resource_jars}
-ResourceSrcs: {resource_src}
-ResourceShortPaths: {resource_short_paths}
-ResourceStripPrefix: {resource_strip_prefix}
-ScalacOpts: {scala_opts}
-SourceJars: {srcjars}
-DependencyAnalyzerMode: {dependency_analyzer_mode}
-UnusedDependencyCheckerMode: {unused_dependency_checker_mode}
-StatsfileOutput: {statsfile_output}
+    Classpath: {cp}
+    ClasspathResourceSrcs: {classpath_resource_src}
+    Files: {files}
+    JarOutput: {out}
+    Manifest: {manifest}
+    Plugins: {plugin_arg}
+    PrintCompileTime: {print_compile_time}
+    ExpectJavaOutput: {expect_java_output}
+    ResourceDests: {resource_dest}
+    ResourceJars: {resource_jars}
+    ResourceSrcs: {resource_src}
+    ResourceShortPaths: {resource_short_paths}
+    ResourceStripPrefix: {resource_strip_prefix}
+    ScalacOpts: {scala_opts}
+    SourceJars: {srcjars}
+    DependencyAnalyzerMode: {dependency_analyzer_mode}
+    UnusedDependencyCheckerMode: {unused_dependency_checker_mode}
+    StatsfileOutput: {statsfile_output}
 """.format(
         out = output.path,
         manifest = manifest.path,
@@ -463,7 +504,7 @@ StatsfileOutput: {statsfile_output}
     )
 
 #compile_scala = compile_scala_old
-compile_scala = compile_scala_old
+compile_scala = compile_scala_new
 
 def _interim_java_provider_for_java_compilation(scala_output):
     return java_common.create_provider(
@@ -523,7 +564,7 @@ def try_to_compile_java_jar(
     return struct(
         jar = full_java_jar,
         ijar = provider.compile_jars.to_list().pop(),
-        source_jars = provider.source_jars
+        source_jars = provider.source_jars,
     )
 
 def collect_java_providers_of(deps):
@@ -683,8 +724,7 @@ def _write_java_wrapper(ctx, args = "", wrapper_preamble = ""):
     """This creates a wrapper that sets up the correct path
          to stand in for the java command."""
 
-    java_path = str(ctx.attr._java_runtime[java_common.JavaRuntimeInfo]
-        .java_executable_runfiles_path)
+    java_path = str(ctx.attr._java_runtime[java_common.JavaRuntimeInfo].java_executable_runfiles_path)
     if _path_is_absolute(java_path):
         javabin = java_path
     else:
@@ -987,31 +1027,33 @@ def _scala_binary_common(
     )
 
 def _pack_source_jars(ctx):
-  source_jars = []
+    source_jars = []
 
-  # collect .scala sources and pack a source jar for Scala
-  scala_sources = [
-      f for f in ctx.files.srcs
-      if f.basename.endswith(_scala_extension)
-  ]
+    # collect .scala sources and pack a source jar for Scala
+    scala_sources = [
+        f
+        for f in ctx.files.srcs
+        if f.basename.endswith(_scala_extension)
+    ]
 
-  # collect .srcjar files and pack them with the scala sources
-  bundled_source_jars = [
-      f for f in ctx.files.srcs
-      if f.basename.endswith(_srcjar_extension)
-  ]
-  scala_source_jar = java_common.pack_sources(
-      ctx.actions,
-      output_jar = ctx.outputs.jar,
-      sources = scala_sources,
-      source_jars = bundled_source_jars,
-      java_toolchain = ctx.attr._java_toolchain,
-      host_javabase = ctx.attr._host_javabase
-  )
-  if scala_source_jar:
-    source_jars.append(scala_source_jar)
+    # collect .srcjar files and pack them with the scala sources
+    bundled_source_jars = [
+        f
+        for f in ctx.files.srcs
+        if f.basename.endswith(_srcjar_extension)
+    ]
+    scala_source_jar = java_common.pack_sources(
+        ctx.actions,
+        output_jar = ctx.outputs.jar,
+        sources = scala_sources,
+        source_jars = bundled_source_jars,
+        java_toolchain = ctx.attr._java_toolchain,
+        host_javabase = ctx.attr._host_javabase,
+    )
+    if scala_source_jar:
+        source_jars.append(scala_source_jar)
 
-  return source_jars
+    return source_jars
 
 def scala_binary_impl(ctx):
     scalac_provider = _scalac_provider(ctx)

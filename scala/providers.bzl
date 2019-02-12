@@ -1,3 +1,10 @@
+ScalaInfo = provider(
+    fields = {
+        "java_info":"JavaInfo provider",
+        "statsfile":"Compilation stats file",
+    }
+)
+
 # TODO: this should really be a bazel provider, but we are using old-style rule outputs
 # we need to document better what the intellij dependencies on this code actually are
 def create_scala_provider(
