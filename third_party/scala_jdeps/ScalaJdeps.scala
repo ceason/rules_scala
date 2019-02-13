@@ -126,6 +126,7 @@ object ScalaJdeps {
     val targetLabel = Option(jar.getManifest
       .getMainAttributes
       .getValue("Target-Label"))
+    jar.close()
     // just default to the jar path if we couldn't find the label
     targetLabel.getOrElse(jarPath)
   }
