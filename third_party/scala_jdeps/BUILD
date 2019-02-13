@@ -16,6 +16,7 @@ scala_library_for_plugin_bootstrapping(
     name = "scala_jdeps",
     srcs = [
         "ScalaJdeps.scala",
+        "Config.scala",
     ],
     resources = ["resources/scalac-plugin.xml"],
     visibility = ["//visibility:public"],

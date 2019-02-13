@@ -3,6 +3,7 @@ package third_party.scala_jdeps
 import java.io.FileOutputStream
 import java.util.jar.JarFile
 
+import com.google.devtools.build.lib.view.proto.Deps.{Dependencies, Dependency}
 import third_party.scala_jdeps.Config.EnforcementMode
 import third_party.scala_jdeps.ScalaJdeps._
 
@@ -83,6 +84,7 @@ object ScalaJdeps {
     c.directJars
       .filterNot(usedJars.contains)
       .filterNot(c.ignoredJars.contains)
+      .filter(ignoreJavaRuntimeJars)
       .map(getTargetFromJar)
       .map { target =>
         s"""Target '$target' is specified as a dependency to ${c.currentTarget} but isn't used, please remove it from the deps.
@@ -105,6 +107,7 @@ object ScalaJdeps {
     usedJars.toSeq
       .filterNot(c.directJars.contains)
       .filterNot(c.ignoredJars.contains)
+      .filter(ignoreJavaRuntimeJars)
       .map(getTargetFromJar)
       .map { target =>
         s"""Target '$target' is used but isn't explicitly declared, please add it to the deps.
@@ -117,6 +120,12 @@ object ScalaJdeps {
         case _ =>
       }
     }
+  }
+
+  // ideally these jars would be passed in via ignore-jars, but currently i don't
+  // know how to find the java runtime jars in starlark
+  private def ignoreJavaRuntimeJars(path: String): Boolean = {
+    !path.endsWith("/lib/rt.jar")
   }
 
   private def getTargetFromJar(jarPath: String): String = {

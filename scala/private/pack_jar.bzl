@@ -8,7 +8,7 @@ def _resource_dest_path(file, resource_strip_prefix):
     #  Here we are looking to find out the offset of this resource inside
     #  any resources folder. We want to return the root to the resources folder
     #  and then the sub path inside it
-    dir_1, dir_2, rel_path = file.short_path.partition("resources")
+    dir_1, dir_2, rel_path = file.short_path.partition("resources/")
     if rel_path:
         return rel_path
 

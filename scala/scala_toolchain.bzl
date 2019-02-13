@@ -11,7 +11,7 @@ def _scala_toolchain_impl(ctx):
         scalac_provider_attr = ctx.attr.scalac_provider_attr,
         unused_dependency_checker_mode = ctx.attr.unused_dependency_checker_mode,
         runtime = runtime,
-        deps_enforcer_ignored_jars = runtime.transitive_compile_time_jars
+        deps_enforcer_ignored_jars = runtime.transitive_compile_time_jars,
     )
     return [toolchain, runtime]
 
@@ -28,7 +28,7 @@ scala_toolchain = rule(
             values = ["off", "warn", "error"],
         ),
         "runtime": attr.label_list(
-            providers = [[JavaInfo]]
+            providers = [[JavaInfo]],
         ),
     },
 )

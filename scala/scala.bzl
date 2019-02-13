@@ -149,7 +149,7 @@ _common_attrs.update({
         allow_files = [".jar"],
         mandatory = False,
     ),
-    "_jdeps_plugin": attr.label(
+    "_scalac_jdeps_plugin": attr.label(
         default = Label(
             "//third_party/scala_jdeps:scala_jdeps",
         ),

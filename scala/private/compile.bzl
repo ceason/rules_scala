@@ -93,7 +93,8 @@ def compile(
         jdeps_jars = ctx.attr._scalac_jdeps_plugin[JavaInfo].transitive_runtime_jars
         compile_inputs += [jdeps_jars]
         compile_outputs += [output_jdeps]
-        args.add_all(
+        args.add("--scalac_opts", "-Xplugin-require:scala-jdeps")
+        args.add_joined(
             "--scalac_opts",
             jdeps_jars,
             join_with = ctx.configuration.host_path_separator,
