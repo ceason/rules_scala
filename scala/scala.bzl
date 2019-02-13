@@ -169,7 +169,6 @@ _common_outputs = {
     "deploy_jar": "%{name}_deploy.jar",
     "manifest": "%{name}_MANIFEST.MF",
     "statsfile": "%{name}.statsfile",
-    "jdeps": "%{name}.jdeps",
     "srcjar": "%{name}-src.jar",
 }
 

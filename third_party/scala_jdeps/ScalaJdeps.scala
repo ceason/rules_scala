@@ -1,14 +1,11 @@
 package third_party.scala_jdeps
 
-import java.io.{FileInputStream, FileOutputStream}
+import java.io.FileOutputStream
+import java.util.jar.JarFile
 
-import com.google.devtools.build.lib.view.proto.Deps.{Dependencies, Dependency}
-import rules_scala.compileoptions.CompileOptionsOuterClass.CompileOptions
-import rules_scala.compileoptions.CompileOptionsOuterClass.CompileOptions.EnforcementMode
+import third_party.scala_jdeps.Config.EnforcementMode
 import third_party.scala_jdeps.ScalaJdeps._
 
-import scala.collection.JavaConverters._
-import scala.reflect.io.AbstractFile
 import scala.tools.nsc.plugins.{Plugin, PluginComponent}
 import scala.tools.nsc.{Global, Phase}
 
@@ -19,31 +16,19 @@ class ScalaJdeps(val global: Global) extends Plugin {
 
   val components: List[PluginComponent] = List[PluginComponent](Component)
 
-  var opts: CompileOptions = _
+  implicit var cfg: Config = _
 
-  override def init(options: List[String], error: (String) => Unit): Boolean = {
-    for (option <- options) {
-      option.split(":").toList match {
-        case "compile-options" :: path :: Nil =>
-          val f = new FileInputStream(path)
-          opts = CompileOptions.parseFrom(f)
-          f.close()
-        case unknown :: _ =>
-          error(s"unknown param $unknown")
-        case Nil =>
-      }
+  override def init(options: List[String], error: String => Unit): Boolean = {
+    try cfg = new Config(options) catch {
+      case e: RuntimeException =>
+        error(s"couldn't initialize scala-jdeps config: ${e.getMessage}")
+        return false
     }
-    opts != null || {
-      error(s"CompileOptions failed to initialize. Are you sure you provided the 'compile-options' plugin arg?")
-      false
-    }
+    true
   }
 
-
   private object Component extends PluginComponent {
-    val global: Global = self.global
-
-    import global._
+    implicit val global: Global = self.global
 
     override val runsAfter = List("jvm")
 
@@ -52,32 +37,16 @@ class ScalaJdeps(val global: Global) extends Plugin {
     override def newPhase(prev: Phase): StdPhase = new StdPhase(prev) {
       override def run(): Unit = {
         super.run()
-
-        val usedJars = findUsedJars(global).map(_.path)
-
-        for (message <- enforceUnusedDeps(opts, usedJars)) {
-          opts.getUnusedDepsMode match {
-            case EnforcementMode.WARN => reporter.warning(NoPosition, message)
-            case EnforcementMode.ERROR => reporter.error(NoPosition, message)
-            case _ =>
-          }
-        }
-
-        for (message <- enforceStrictDeps(opts, usedJars)) {
-          opts.getStrictDepsMode match {
-            case EnforcementMode.WARN => reporter.warning(NoPosition, message)
-            case EnforcementMode.ERROR => reporter.error(NoPosition, message)
-            case _ =>
-          }
-        }
-
-        val jdeps = buildJdeps(opts, usedJars)
-        val jdepsFile = new FileOutputStream(opts.getJdepsOutput)
+        val usedJars = findUsedJars
+        enforceUnusedDeps(usedJars)
+        enforceStrictDeps(usedJars)
+        val jdeps = buildJdeps(usedJars)
+        val jdepsFile = new FileOutputStream(cfg.output)
         jdeps.writeTo(jdepsFile)
         jdepsFile.close()
       }
 
-      override def apply(unit: CompilationUnit): Unit = ()
+      override def apply(unit: global.CompilationUnit): Unit = ()
     }
   }
 
@@ -86,15 +55,15 @@ class ScalaJdeps(val global: Global) extends Plugin {
 
 object ScalaJdeps {
 
-  def buildJdeps(o: CompileOptions, usedJars: Set[String]): Dependencies = {
+
+  def buildJdeps(usedJars: Set[String])(implicit c: Config): Dependencies = {
     val deps = Dependencies.newBuilder()
-      .setRuleLabel(o.getCurrentTarget)
+      .setRuleLabel(c.currentTarget)
       .setSuccess(true)
-    val directJars = o.getDirectJarsList.asScala.toSet
-    for (jar <- o.getClasspathJarsList.asScala) {
+    for (jar <- c.classpathJars) {
       val kind = if (!usedJars.contains(jar)) {
         Dependency.Kind.UNUSED
-      } else if (directJars.contains(jar)) {
+      } else if (c.directJars.contains(jar)) {
         Dependency.Kind.EXPLICIT
       } else {
         Dependency.Kind.IMPLICIT
@@ -107,48 +76,62 @@ object ScalaJdeps {
     deps.build()
   }
 
-  def enforceUnusedDeps(o: CompileOptions, usedJars: Set[String]): Seq[String] = {
-    if (o.getUnusedDepsMode == EnforcementMode.OFF) {
-      return Nil
+  def enforceUnusedDeps(usedJars: Set[String])(implicit g: Global, c: Config): Unit = {
+    if (c.unusedDeps == EnforcementMode.Off) {
+      return
     }
-    val ignoredJars = o.getUnusedDepsIgnoredJarsList.asScala.toSet
-    o.getDirectJarsList.asScala
+    c.directJars
       .filterNot(usedJars.contains)
-      .filterNot(ignoredJars.contains)
+      .filterNot(c.ignoredJars.contains)
       .map(getTargetFromJar)
       .map { target =>
-        s"""Target '$target' is specified as a dependency to ${o.getCurrentTarget} but isn't used, please remove it from the deps.
+        s"""Target '$target' is specified as a dependency to ${c.currentTarget} but isn't used, please remove it from the deps.
            |You can use the following buildozer command:
-           |buildozer 'remove deps $target' ${o.getCurrentTarget}
+           |buildozer 'remove deps $target' ${c.currentTarget}
            |""".stripMargin
+      }.foreach { errMsg =>
+      c.unusedDeps match {
+        case EnforcementMode.Error => g.reporter.error(g.NoPosition, errMsg)
+        case EnforcementMode.Warn => g.reporter.warning(g.NoPosition, errMsg)
+        case _ =>
       }
+    }
   }
 
-  def enforceStrictDeps(o: CompileOptions, usedJars: Set[String]): Seq[String] = {
-    if (o.getStrictDepsMode == EnforcementMode.OFF) {
-      return Nil
+  def enforceStrictDeps(usedJars: Set[String])(implicit g: Global, c: Config): Unit = {
+    if (c.strictDeps == EnforcementMode.Off) {
+      return
     }
-    val ignoredJars = o.getStrictDepsIgnoredJarsList.asScala.toSet
-    val directJars = o.getDirectJarsList.asScala.toSet
     usedJars.toSeq
-      .filterNot(directJars.contains)
-      .filterNot(ignoredJars.contains)
+      .filterNot(c.directJars.contains)
+      .filterNot(c.ignoredJars.contains)
       .map(getTargetFromJar)
       .map { target =>
         s"""Target '$target' is used but isn't explicitly declared, please add it to the deps.
            |You can use the following buildozer command:
-           |buildozer 'add deps $target' ${o.getCurrentTarget}""".stripMargin
+           |buildozer 'add deps $target' ${c.currentTarget}""".stripMargin
+      }.foreach { errMsg =>
+      c.unusedDeps match {
+        case EnforcementMode.Error => g.reporter.error(g.NoPosition, errMsg)
+        case EnforcementMode.Warn => g.reporter.warning(g.NoPosition, errMsg)
+        case _ =>
       }
+    }
   }
 
   private def getTargetFromJar(jarPath: String): String = {
-    // TODO: extract target label from jar
-    jarPath
+    // extract target label from jar
+    val jar = new JarFile(jarPath)
+    val targetLabel = Option(jar.getManifest
+      .getMainAttributes
+      .getValue("Target-Label"))
+    // just default to the jar path if we couldn't find the label
+    targetLabel.getOrElse(jarPath)
   }
 
-  def findUsedJars(global: Global): Set[AbstractFile] = {
+  def findUsedJars(implicit global: Global): Set[String] = {
     import global._
-    val jars = collection.mutable.Set[AbstractFile]()
+    val jars = collection.mutable.Set[String]()
 
     def walkTopLevels(root: Symbol): Unit = {
       def safeInfo(sym: Symbol): Type =
@@ -164,7 +147,7 @@ object ScalaJdeps {
           if (x.hasRawInfo && x.rawInfo.isComplete) {
             val assocFile = x.associatedFile
             if (assocFile.path.endsWith(".class") && assocFile.underlyingSource.isDefined)
-              assocFile.underlyingSource.foreach(jars += _)
+              assocFile.underlyingSource.foreach(jars += _.path)
           }
         }
       }

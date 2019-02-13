@@ -1,6 +1,6 @@
 # helps filter inputs to scalac (eg unneeded files from extracted srcjars)
 def _filter_scalac_inputs(file):
-    if file.endswith(".scala") or file.endswith(".java"):
+    if file.basename.endswith(".scala") or file.basename.endswith(".java"):
         return file.path
     else:
         return []
@@ -51,16 +51,18 @@ def compile(
     args.add_all("--scalac_opts", scalac_opts)
 
     # classpath
+    classpath_jars = depset(transitive = [d.transitive_compile_time_jars for d in deps])
     args.add("--scalac_opts", "-classpath")
     args.add_joined(
         "--scalac_opts",
-        depset(transitive = [d[JavaInfo].transitive_compile_jars for d in deps]),
+        classpath_jars,
         join_with = ctx.configuration.host_path_separator,
     )
+    compile_inputs += [classpath_jars]
 
     # srcs
     args.add_all("--sources", source_files)
-    input += source_files
+    compile_inputs += source_files
 
     # unpack srcjars if there are any
     #  each jar is unpacked to directory of "_scalac/%{jarname}_unpacked"
@@ -74,7 +76,7 @@ def compile(
             arguments = ["x", srcjar.path, "-d", srcjar_dir.path],
         )
         args.add_all("--sources", [srcjar_dir], expand_directories = True, map_each = _filter_scalac_inputs)
-        input += [srcjar_dir]
+        compile_inputs += [srcjar_dir]
 
     # add provided plugins
     for p in plugins:
@@ -99,17 +101,28 @@ def compile(
         )
         ignored_jars = [deps_enforcer_ignored_jars, tc.deps_enforcer_ignored_jars]
         ignored_jars = [j for j in ignored_jars if j != None]  # filter empty
-        input += ignored_jars
-        args.add(
+        args.add_joined(
             "--scalac_opts",
             depset(transitive = ignored_jars),
             join_with = ctx.configuration.host_path_separator,
-            format_joined = "-P:scala-jdeps:deps-enforcer-ignored-jars:%s",
+            format_joined = "-P:scala-jdeps:ignored-jars:%s",
+        )
+        args.add_joined(
+            "--scalac_opts",
+            classpath_jars,
+            join_with = ctx.configuration.host_path_separator,
+            format_joined = "-P:scala-jdeps:classpath-jars:%s",
         )
         direct_jars = depset(transitive = [d.compile_jars for d in deps])
-        input += [direct_jars]
-        args.add("--scalac_opts", direct_jars, format = "-P:scala-jdeps:direct-jars:%s")
+        compile_inputs += [direct_jars]
+        args.add_joined(
+            "--scalac_opts",
+            direct_jars,
+            join_with = ctx.configuration.host_path_separator,
+            format_joined = "-P:scala-jdeps:direct-jars:%s",
+        )
         args.add("--scalac_opts", output_jdeps, format = "-P:scala-jdeps:output:%s")
+        args.add("--scalac_opts", str(ctx.label), format = "-P:scala-jdeps:current-target:%s")
         args.add("--scalac_opts", strict_deps_mode, format = "-P:scala-jdeps:strict-deps-mode:%s")
         args.add("--scalac_opts", unused_deps_mode, format = "-P:scala-jdeps:unused-deps-mode:%s")
 
@@ -123,15 +136,16 @@ def compile(
 
     # compile this shiz
     # invoke the compiler with the args/opts file
+    tools, _, input_manifests = ctx.resolve_command(tools=[ctx.attr._scalac])
     ctx.actions.run(
         inputs = depset(
             direct = [i for i in compile_inputs if type(i) != "depset"],
             transitive = [i for i in compile_inputs if type(i) == "depset"],
         ),
         outputs = compile_outputs,
-        executable = tc.scalac.files_to_run.executable,
-        #        input_manifests = scalac_input_manifests,
-        tools = tc.scalac.default_runfiles.files,
+        executable = ctx.attr._scalac.files_to_run.executable,
+        input_manifests = input_manifests,
+        tools = tools,
         mnemonic = "Scalac",
         progress_message = "scala %s" % ctx.label,
         execution_requirements = {"supports-workers": "1"},

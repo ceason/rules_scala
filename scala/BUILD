@@ -11,6 +11,10 @@ toolchain_type(
 
 scala_toolchain(
     name = "default_toolchain_impl",
+    runtime = [
+        "@io_bazel_rules_scala_scala_library",
+        "@io_bazel_rules_scala_scala_reflect",
+    ],
     scalacopts = [],
     visibility = ["//visibility:public"],
 )
@@ -24,6 +28,10 @@ toolchain(
 
 scala_toolchain(
     name = "unused_dependency_checker_error_toolchain_impl",
+    runtime = [
+        "@io_bazel_rules_scala_scala_library",
+        "@io_bazel_rules_scala_scala_reflect",
+    ],
     unused_dependency_checker_mode = "error",
     visibility = ["//visibility:public"],
 )

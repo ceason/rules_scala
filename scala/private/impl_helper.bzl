@@ -7,28 +7,40 @@ def impl_helper(
         ctx,
 
         # depset[File]
-        deps_enforcer_ignored_jars = [],
+        deps_enforcer_ignored_jars = None,
+
+        # list[JavaInfo]
+        extra_classpath = [],
 
         # bool
         use_ijar = False):
+    tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
     unused_deps = getattr(ctx.attr, "unused_dependency_checker_mode", None)
     strict_deps = ctx.fragments.java.strict_java_deps
     if strict_deps == "default":
         strict_deps = None
 
+    deps = [tc.runtime] + extra_classpath + [
+        d[JavaInfo]
+        for d in ctx.attr.deps
+    ]
+
     # TODO: migration for non-JavaInfo plugins
 
     # compile scala
     scalac_output = ctx.actions.declare_file("%s-scala-class.jar" % ctx.label.name)
+    jdeps = None
+    if hasattr(ctx.attr, "_scalac_jdeps_plugin"):
+        jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.label.name)
     compile(
         ctx,
-        source_jars = [f for f in ctx.files.srcs if f.endswith(".srcjar")],
-        source_files = [f for f in ctx.files.srcs if not f.endswith(".srcjar")],
+        source_jars = [f for f in ctx.files.srcs if f.path.endswith(".srcjar")],
+        source_files = [f for f in ctx.files.srcs if not f.path.endswith(".srcjar")],
         output = scalac_output,
         output_statsfile = ctx.outputs.statsfile,
-        output_jdeps = ctx.outputs.jdeps,
+        output_jdeps = jdeps,
         scalac_opts = ctx.attr.scalacopts,
-        deps = [d[JavaInfo] for d in ctx.attr.deps],
+        deps = deps,
         plugins = [d[JavaInfo] for d in ctx.attr.plugins],
         unused_deps_mode = unused_deps,
         strict_deps_mode = strict_deps,
@@ -37,25 +49,23 @@ def impl_helper(
                 deps_enforcer_ignored_jars or []
             ) + [
                 d[JavaInfo].compile_jars
-                for d in ctx.attr.unused_dependency_checker_ignored_targets
+                for d in getattr(ctx.attr, "unused_dependency_checker_ignored_targets", [])
             ],
         ),
     )
 
     # maybe compile java
     full_compile_jar = scalac_output  # this might be overridden if we're outputting java too
-    java_files = [f for f in ctx.files.srcs if f.endswith(".java")]
+    java_files = [f for f in ctx.files.srcs if f.path.endswith(".java")]
     if java_files or ctx.attr.expect_java_output:
         javac_output = ctx.actions.declare_file("%s-java-class.jar" % ctx.label.name)
         java_common.compile(
             ctx,
-            source_jars = [f for f in ctx.files.srcs if f.endswith(".srcjar")],
+            source_jars = [f for f in ctx.files.srcs if f.path.endswith(".srcjar")],
             source_files = java_files,
             output = javac_output,
             javac_opts = ctx.attr.javacopts,
-            deps = [d[JavaInfo] for d in ctx.attr.deps] + [
-                JavaInfo(compile_jar = scalac_output),
-            ],
+            deps = deps + [JavaInfo(compile_jar = scalac_output)],
             java_toolchain = ctx.attr._java_toolchain,
             host_javabase = ctx.attr._host_javabase,
             strict_deps = ctx.fragments.java.strict_java_deps,
@@ -87,33 +97,30 @@ def impl_helper(
     )
 
     # create a srcs jar
-    java_common.pack_sources(
+    srcjar = java_common.pack_sources(
         ctx.actions,
-        output = ctx.outputs.srcjar,
-        sources = [f for f in ctx.files.srcs if not f.endswith(".srcjar")],
-        source_jars = [f for f in ctx.files.srcs if f.endswith(".srcjar")],
+        output_jar = ctx.outputs.jar,
+        sources = [f for f in ctx.files.srcs if not f.path.endswith(".srcjar")],
+        source_jars = [f for f in ctx.files.srcs if f.path.endswith(".srcjar")],
         java_toolchain = ctx.attr._java_toolchain,
         host_javabase = ctx.attr._host_javabase,
     )
 
     # create a label-stamped compile_jar (using ijar, if possible)
-    compile_jar_tool = java_common.run_ijar if use_ijar else java_common.stamp_jar
-    compile_jar = compile_jar_tool(
-        ctx.actions,
-        jar = full_compile_jar,
-        target_label = ctx.label,
-        java_toolchain = ctx._java_toolchain,
-    )
+    if use_ijar:
+        compile_jar = java_common.run_ijar(ctx.actions, jar = full_compile_jar, target_label = ctx.label, java_toolchain = ctx.attr._java_toolchain)
+    else:
+        compile_jar = java_common.stamp_jar(ctx.actions, jar = full_compile_jar, target_label = ctx.label, java_toolchain = ctx.attr._java_toolchain)
 
     java_info = JavaInfo(
         output_jar = ctx.outputs.jar,
         compile_jar = compile_jar,
-        source_jar = ctx.outputs.srcjar,
-        neverlink = ctx.attr.neverlink,
-        deps = [d[JavaInfo] for d in ctx.attr.deps],
+        source_jar = srcjar,
+        neverlink = getattr(ctx.attr, "neverlink", False),
+        deps = deps,
         exports = [d[JavaInfo] for d in ctx.attr.exports],
         runtime_deps = [d[JavaInfo] for d in ctx.attr.runtime_deps],
-        jdeps = ctx.outputs.jdeps,
+        jdeps = jdeps,
     )
 
     # create the deploy jar
@@ -122,6 +129,7 @@ def impl_helper(
         output = ctx.outputs.deploy_jar,
         transitive_jars = java_info.transitive_runtime_jars,
         main_class = getattr(ctx.attr, "main_class", None),
+        compression = True,
     )
 
     # not sure making the manifest available as a separate thing makes sense,

@@ -21,17 +21,24 @@ java_binary(
     deps = [
         ":exported_scalac_repositories_from_toolchain_to_jvm",
         "@io_bazel_rules_scala//src/java/com/google/devtools/build/lib:worker",
-        "@io_bazel_rules_scala//src/java/io/bazel/rulesscala/jar",
+#        "@io_bazel_rules_scala//src/java/io/bazel/rulesscala/jar",
         "@io_bazel_rules_scala//src/java/io/bazel/rulesscala/worker",
-        "@scalac_rules_commons_io//jar",
+#        "@scalac_rules_commons_io//jar",
     ],
+)
+
+java_binary(
+    name = "wtf",
+    srcs = ["WtfTest.java"],
+    deps = [":scalac"],
+    main_class = "io.bazel.rulesscala.scalac.WtfTest"
 )
 
 filegroup(
     name = "scalac_files",
     srcs = [
         "CompileOptions.java",
-        "Resource.java",
+#        "Resource.java",
         "ScalaCInvoker.java",
         "ScalacProcessor.java",
     ],
