@@ -15,7 +15,7 @@ class Config(args: List[String]) {
 
   var directJars: mutable.Set[String] = mutable.HashSet()
   var ignoredJars: mutable.Set[String] = mutable.HashSet()
-  var classpathJars: ArrayBuffer[String] = mutable.ArrayBuffer[String]()
+  val classpathJars: mutable.Set[String] = mutable.HashSet()
   var output: String = _
   var strictDeps: EnforcementMode = EnforcementMode.Off
   var unusedDeps: EnforcementMode = EnforcementMode.Off
@@ -35,6 +35,7 @@ class Config(args: List[String]) {
   }
   require(output != null, "Must provide '-P:scala-jdeps:output:<outputPath>' arg")
   require(currentTarget != null, "Must provide '-P:scala-jdeps:current-target:<targetLabel>' arg")
+
 }
 
 object Config {

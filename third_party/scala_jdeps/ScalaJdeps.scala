@@ -53,15 +53,13 @@ class ScalaJdeps(val global: Global) extends Plugin {
 
 }
 
-
 object ScalaJdeps {
-
 
   def buildJdeps(usedJars: Set[String])(implicit c: Config): Dependencies = {
     val deps = Dependencies.newBuilder()
       .setRuleLabel(c.currentTarget)
       .setSuccess(true)
-    for (jar <- c.classpathJars) {
+    for (jar <- c.classpathJars.toList.sorted) {
       val kind = if (!usedJars.contains(jar)) {
         Dependency.Kind.UNUSED
       } else if (c.directJars.contains(jar)) {
@@ -84,7 +82,7 @@ object ScalaJdeps {
     c.directJars
       .filterNot(usedJars.contains)
       .filterNot(c.ignoredJars.contains)
-      .filter(ignoreJavaRuntimeJars)
+      .filter(c.classpathJars.contains)
       .map(getTargetFromJar)
       .map { target =>
         s"""Target '$target' is specified as a dependency to ${c.currentTarget} but isn't used, please remove it from the deps.
@@ -107,7 +105,7 @@ object ScalaJdeps {
     usedJars.toSeq
       .filterNot(c.directJars.contains)
       .filterNot(c.ignoredJars.contains)
-      .filter(ignoreJavaRuntimeJars)
+      .filter(c.classpathJars.contains)
       .map(getTargetFromJar)
       .map { target =>
         s"""Target '$target' is used but isn't explicitly declared, please add it to the deps.
@@ -120,12 +118,6 @@ object ScalaJdeps {
         case _ =>
       }
     }
-  }
-
-  // ideally these jars would be passed in via ignore-jars, but currently i don't
-  // know how to find the java runtime jars in starlark
-  private def ignoreJavaRuntimeJars(path: String): Boolean = {
-    !path.endsWith("/lib/rt.jar")
   }
 
   private def getTargetFromJar(jarPath: String): String = {
