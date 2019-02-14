@@ -1,5 +1,6 @@
 load(":compile.bzl", "compile")
 load(":pack_jar.bzl", "pack_jar")
+load(":launcher.bzl", "launcher")
 
 # Does the common recipe, using ctx.attrs directly.
 # Returns struct with legacy providers & new provider format.
@@ -10,17 +11,33 @@ def impl_helper(
         deps_enforcer_ignored_jars = None,
 
         # list[JavaInfo]
-        extra_classpath = [],
+        extra_deps = [],
+
+        # list[String]
+        extra_jvm_flags = [],
+
+        # File
+        output_executable = None,
+        output_statsfile = None,
+        output_deploy_jar = None,
+        output_manifest = None,
+        output_jar = None,
+        output_jdeps = None,
+
+        # String
+        executable_wrapper_preamble = None,
+        override_main_class = None,
 
         # bool
         use_ijar = False):
     tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
     unused_deps = getattr(ctx.attr, "unused_dependency_checker_mode", None)
+    main_class = override_main_class or getattr(ctx.attr, "main_class", None)
     strict_deps = ctx.fragments.java.strict_java_deps
     if strict_deps == "default":
         strict_deps = None
 
-    deps = [tc.runtime] + extra_classpath + [
+    deps = [tc.runtime] + extra_deps + [
         d[JavaInfo]
         for d in ctx.attr.deps
     ]
@@ -28,17 +45,14 @@ def impl_helper(
     # TODO: migration for non-JavaInfo plugins
 
     # compile scala
-    scalac_output = ctx.actions.declare_file("%s-scala-class.jar" % ctx.label.name)
-    jdeps = None
-    if hasattr(ctx.attr, "_scalac_jdeps_plugin"):
-        jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.label.name)
+    scalac_output = ctx.actions.declare_file("%s-scala-class.jar" % output_jar.basename[:-len(".jar")])
     compile(
         ctx,
         source_jars = [f for f in ctx.files.srcs if f.path.endswith(".srcjar")],
         source_files = [f for f in ctx.files.srcs if not f.path.endswith(".srcjar")],
         output = scalac_output,
-        output_statsfile = ctx.outputs.statsfile,
-        output_jdeps = jdeps,
+        output_statsfile = output_statsfile,
+        output_jdeps = output_jdeps,
         scalac_opts = ctx.attr.scalacopts,
         deps = deps,
         plugins = [d[JavaInfo] for d in ctx.attr.plugins],
@@ -58,7 +72,7 @@ def impl_helper(
     full_compile_jar = scalac_output  # this might be overridden if we're outputting java too
     java_files = [f for f in ctx.files.srcs if f.path.endswith(".java")]
     if java_files or ctx.attr.expect_java_output:
-        javac_output = ctx.actions.declare_file("%s-java-class.jar" % ctx.label.name)
+        javac_output = ctx.actions.declare_file("%s-java-class.jar" % output_jar.basename[:-len(".jar")])
         java_common.compile(
             ctx,
             source_jars = [f for f in ctx.files.srcs if f.path.endswith(".srcjar")],
@@ -72,7 +86,7 @@ def impl_helper(
         )
 
         # combine the java and scala compiled jars
-        full_compile_jar = ctx.actions.declare_file("%s-class.jar" % ctx.label.name)
+        full_compile_jar = ctx.actions.declare_file("%s-class.jar" % output_jar.basename[:-len(".jar")])
         pack_jar(
             ctx,
             output = full_compile_jar,
@@ -80,26 +94,19 @@ def impl_helper(
         )
 
     # pack the compiled jar with resources
-    packjar_jars = [full_compile_jar]
-    packjar_jars += getattr(ctx.files, "resource_jars", [])
-    packjar_kwargs = {}
-    if hasattr(ctx.attr, "main_class"):
-        packjar_kwargs["main_class"] = ctx.attr.main_class
-    if hasattr(ctx.files, "classpath_resources"):
-        packjar_kwargs["classpath_resources"] = ctx.files.classpath_resources
     pack_jar(
         ctx,
-        output = ctx.outputs.jar,
-        jars = packjar_jars,
+        output = output_jar,
+        jars = [full_compile_jar] + getattr(ctx.files, "resource_jars", []),
         resource_strip_prefix = getattr(ctx.attr, "resource_strip_prefix", ""),
         resources = getattr(ctx.files, "resources", []),
-        **packjar_kwargs
+        classpath_resources = getattr(ctx.attr, "classpath_resources", []),
     )
 
     # create a srcs jar
     srcjar = java_common.pack_sources(
         ctx.actions,
-        output_jar = ctx.outputs.jar,
+        output_jar = output_jar,
         sources = [f for f in ctx.files.srcs if not f.path.endswith(".srcjar")],
         source_jars = [f for f in ctx.files.srcs if f.path.endswith(".srcjar")],
         java_toolchain = ctx.attr._java_toolchain,
@@ -113,45 +120,59 @@ def impl_helper(
         compile_jar = java_common.stamp_jar(ctx.actions, jar = full_compile_jar, target_label = ctx.label, java_toolchain = ctx.attr._java_toolchain)
 
     java_info = JavaInfo(
-        output_jar = ctx.outputs.jar,
+        output_jar = output_jar,
         compile_jar = compile_jar,
         source_jar = srcjar,
         neverlink = getattr(ctx.attr, "neverlink", False),
         deps = deps,
         exports = [d[JavaInfo] for d in ctx.attr.exports],
         runtime_deps = [d[JavaInfo] for d in ctx.attr.runtime_deps],
-        jdeps = jdeps,
+        jdeps = output_jdeps,
     )
 
     # create the deploy jar
-    pack_jar(
-        ctx,
-        output = ctx.outputs.deploy_jar,
-        transitive_jars = java_info.transitive_runtime_jars,
-        main_class = getattr(ctx.attr, "main_class", None),
-        compression = True,
-    )
+    if output_deploy_jar:
+        pack_jar(
+            ctx,
+            output = output_deploy_jar,
+            transitive_jars = java_info.transitive_runtime_jars,
+            main_class = main_class,
+            compression = True,
+        )
 
     # not sure making the manifest available as a separate thing makes sense,
     # but doing it anyway to maintain existing behavior
-    ctx.actions.run_shell(
-        inputs = [ctx.outputs.jar],
-        outputs = [ctx.outputs.manifest],
-        command = """#!/usr/bin/env bash
-        set -euo pipefail
-        jar=$1; shift
-        out=$1; shift
-        unzip -p "$jar" META-INF/MANIFEST.MF > "$out"
-        """,
-    )
+    if output_manifest:
+        ctx.actions.run_shell(
+            inputs = [output_jar],
+            outputs = [output_manifest],
+            command = """#!/usr/bin/env bash
+            set -euo pipefail
+            jar=$1; shift
+            out=$1; shift
+            unzip -p "$jar" META-INF/MANIFEST.MF > "$out"
+            """,
+        )
+
+    outputs = [output_jar]
+    if output_executable:
+        outputs += [output_executable]
+        launcher(
+            ctx,
+            output = output_executable,
+            classpath_jars = java_info.transitive_runtime_jars,
+            main_class = main_class,
+            extra_jvm_flags = extra_jvm_flags,
+            wrapper_preamble = executable_wrapper_preamble,
+        )
 
     default_info = DefaultInfo(
-        files = depset(direct = [ctx.outputs.jar]),
+        files = depset(direct = outputs, executable = output_executable),
         runfiles = ctx.runfiles(collect_default = True),
     )
     return struct(
-        java_info = java_info,
-        default_info = default_info,
+        java = java_info,
+        scala = java_info,
         providers = [
             java_info,
             default_info,

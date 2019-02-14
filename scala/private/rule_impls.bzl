@@ -758,12 +758,25 @@ def scala_library_impl(ctx):
     scalac_provider = _scalac_provider(ctx)
     return impl_helper(
         ctx,
+        output_jar = ctx.outputs.jar,
+        output_deploy_jar = ctx.outputs.deploy_jar,
+        output_statsfile = ctx.outputs.statsfile,
+        output_manifest = ctx.outputs.manifest,
+        output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
         use_ijar = True,
-        extra_classpath = [d[JavaInfo] for d in scalac_provider.default_classpath],
+        extra_deps = [d[JavaInfo] for d in scalac_provider.default_classpath],
     )
 
 def scala_library_for_plugin_bootstrapping_impl(ctx):
-    return impl_helper(ctx, use_ijar = False)
+    return impl_helper(
+        ctx,
+        output_jar = ctx.outputs.jar,
+        output_deploy_jar = ctx.outputs.deploy_jar,
+        output_statsfile = ctx.outputs.statsfile,
+        output_manifest = ctx.outputs.manifest,
+        output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
+        use_ijar = False,
+    )
 
 #    scalac_provider = _scalac_provider(ctx)
 #    return _lib(
@@ -778,8 +791,13 @@ def scala_macro_library_impl(ctx):
     scalac_provider = _scalac_provider(ctx)
     return impl_helper(
         ctx,
+        output_jar = ctx.outputs.jar,
+        output_deploy_jar = ctx.outputs.deploy_jar,
+        output_statsfile = ctx.outputs.statsfile,
+        output_manifest = ctx.outputs.manifest,
+        output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
         use_ijar = False,
-        extra_classpath = [d[JavaInfo] for d in scalac_provider.default_macro_classpath],
+        extra_deps = [d[JavaInfo] for d in scalac_provider.default_macro_classpath],
     )
 
 # Common code shared by all scala binary implementations.
@@ -874,59 +892,33 @@ def _pack_source_jars(ctx):
 
 def scala_binary_impl(ctx):
     scalac_provider = _scalac_provider(ctx)
-    unused_dependency_checker_mode = get_unused_dependency_checker_mode(ctx)
-    unused_dependency_checker_is_off = unused_dependency_checker_mode == "off"
-
-    jars = _collect_jars_from_common_ctx(
+    return impl_helper(
         ctx,
-        scalac_provider.default_classpath,
-        unused_dependency_checker_is_off = unused_dependency_checker_is_off,
+        output_executable = ctx.outputs.executable,
+        output_jar = ctx.outputs.jar,
+        output_deploy_jar = ctx.outputs.deploy_jar,
+        output_statsfile = ctx.outputs.statsfile,
+        output_manifest = ctx.outputs.manifest,
+        output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
+        use_ijar = False,
+        extra_deps = [d[JavaInfo] for d in scalac_provider.default_classpath],
     )
-    (cjars, transitive_rjars) = (jars.compile_jars, jars.transitive_runtime_jars)
-
-    wrapper = _write_java_wrapper(ctx, "", "")
-    out = _scala_binary_common(
-        ctx,
-        cjars,
-        transitive_rjars,
-        jars.transitive_compile_jars,
-        jars.jars2labels,
-        wrapper,
-        unused_dependency_checker_mode = unused_dependency_checker_mode,
-        unused_dependency_checker_ignored_targets = [
-            target.label
-            for target in scalac_provider.default_classpath +
-                          ctx.attr.unused_dependency_checker_ignored_targets
-        ],
-    )
-    _write_executable(
-        ctx = ctx,
-        rjars = out.transitive_rjars,
-        main_class = ctx.attr.main_class,
-        jvm_flags = ctx.attr.jvm_flags,
-        wrapper = wrapper,
-    )
-    return out
 
 def scala_repl_impl(ctx):
     scalac_provider = _scalac_provider(ctx)
-
-    unused_dependency_checker_mode = get_unused_dependency_checker_mode(ctx)
-    unused_dependency_checker_is_off = unused_dependency_checker_mode == "off"
-
-    # need scala-compiler for MainGenericRunner below
-    jars = _collect_jars_from_common_ctx(
+    return impl_helper(
         ctx,
-        scalac_provider.default_repl_classpath,
-        unused_dependency_checker_is_off = unused_dependency_checker_is_off,
-    )
-    (cjars, transitive_rjars) = (jars.compile_jars, jars.transitive_runtime_jars)
-
-    args = " ".join(ctx.attr.scalacopts)
-    wrapper = _write_java_wrapper(
-        ctx,
-        args,
-        wrapper_preamble = """
+        output_executable = ctx.outputs.executable,
+        output_jar = ctx.outputs.jar,
+        output_deploy_jar = ctx.outputs.deploy_jar,
+        output_statsfile = ctx.outputs.statsfile,
+        output_manifest = ctx.outputs.manifest,
+        output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
+        use_ijar = False,
+        extra_deps = [d[JavaInfo] for d in scalac_provider.default_repl_classpath],
+        extra_jvm_flags = ctx.attr.scalacopts + ["-Dscala.usejavacp=true"],
+        override_main_class = "scala.tools.nsc.MainGenericRunner",
+        executable_wrapper_preamble = """
 # save stty like in bin/scala
 saved_stty=$(stty -g 2>/dev/null)
 if [[ ! $? ]]; then
@@ -941,30 +933,6 @@ function finish() {
 trap finish EXIT
 """,
     )
-
-    out = _scala_binary_common(
-        ctx,
-        cjars,
-        transitive_rjars,
-        jars.transitive_compile_jars,
-        jars.jars2labels,
-        wrapper,
-        unused_dependency_checker_mode = unused_dependency_checker_mode,
-        unused_dependency_checker_ignored_targets = [
-            target.label
-            for target in scalac_provider.default_repl_classpath +
-                          ctx.attr.unused_dependency_checker_ignored_targets
-        ],
-    )
-    _write_executable(
-        ctx = ctx,
-        rjars = out.transitive_rjars,
-        main_class = "scala.tools.nsc.MainGenericRunner",
-        jvm_flags = ["-Dscala.usejavacp=true"] + ctx.attr.jvm_flags,
-        wrapper = wrapper,
-    )
-
-    return out
 
 def _scala_test_flags(ctx):
     # output report test duration

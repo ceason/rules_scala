@@ -88,8 +88,8 @@ def compile(
             format_joined = "-Xplugin:%s",
         )
 
-    # do this stuff if jdeps plugin is present
-    if hasattr(ctx.attr, "_scalac_jdeps_plugin"):
+    # optionally add jdeps plugin & opts
+    if output_jdeps:
         jdeps_jars = ctx.attr._scalac_jdeps_plugin[JavaInfo].transitive_runtime_jars
         compile_inputs += [jdeps_jars]
         compile_outputs += [output_jdeps]
