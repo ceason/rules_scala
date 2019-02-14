@@ -65,7 +65,7 @@ def impl_helper(
             source_files = java_files,
             output = javac_output,
             javac_opts = ctx.attr.javacopts,
-            deps = deps + [JavaInfo(compile_jar = scalac_output)],
+            deps = deps + [JavaInfo(compile_jar = scalac_output, output_jar = scalac_output)],
             java_toolchain = ctx.attr._java_toolchain,
             host_javabase = ctx.attr._host_javabase,
             strict_deps = ctx.fragments.java.strict_java_deps,

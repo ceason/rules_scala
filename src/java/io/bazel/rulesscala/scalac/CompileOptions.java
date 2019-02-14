@@ -33,7 +33,9 @@ public class CompileOptions {
           outputStatsfile = getValue(arglist);
           break;
         default:
-          throw new RuntimeException(String.format("Unrecognized argument '%s'", currentFlag));
+          throw new RuntimeException(String.format(""
+                  + "Unrecognized argument '%s' in args:\n  %s",
+              currentFlag, String.join("\n  ", args)));
       }
 
     }
