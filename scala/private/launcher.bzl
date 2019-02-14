@@ -33,6 +33,7 @@ def launcher(
         main_class = None,
 
         # list[String]
+        extra_args = [],
         extra_jvm_flags = []):
     if not main_class:
         fail("missing kwarg 'main_class'")
@@ -48,10 +49,15 @@ def launcher(
     ctx.actions.write(
         output = wrapper,
         content = """#!/usr/bin/env bash
-{wrapper_preamble}{javabin} "$@"
+{wrapper_preamble}{javabin} "$@" {args}
 """.format(
             preamble = wrapper_preamble,
             javabin = javabin,
+            args = " ".join([
+                _shell_quote_str(arg)
+                for arg in extra_args
+                #for arg in extra_args + getattr(ctx.attr, "args", [])
+            ])
         ),
         is_executable = True,
     )
@@ -75,7 +81,7 @@ def launcher(
     args.add_joined("%jvm_flags%", [
         ctx.expand_location(f, ctx.attr.data)
         for f in getattr(ctx.attr, "jvm_flags", []) + extra_jvm_flags
-    ], join_with = " ", map_each = _shell_quote_str)
+    ], join_with = " ", map_each = _shell_quote_str, omit_if_empty = False)
     args.add_joined(
         "%classpath%",
         classpath_jars,

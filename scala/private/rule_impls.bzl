@@ -764,7 +764,6 @@ def scala_library_impl(ctx):
         output_manifest = ctx.outputs.manifest,
         output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
         use_ijar = True,
-        extra_deps = [d[JavaInfo] for d in scalac_provider.default_classpath],
     )
 
 def scala_library_for_plugin_bootstrapping_impl(ctx):
@@ -900,8 +899,6 @@ def scala_binary_impl(ctx):
         output_statsfile = ctx.outputs.statsfile,
         output_manifest = ctx.outputs.manifest,
         output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
-        use_ijar = False,
-        extra_deps = [d[JavaInfo] for d in scalac_provider.default_classpath],
     )
 
 def scala_repl_impl(ctx):
@@ -914,9 +911,9 @@ def scala_repl_impl(ctx):
         output_statsfile = ctx.outputs.statsfile,
         output_manifest = ctx.outputs.manifest,
         output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
-        use_ijar = False,
         extra_deps = [d[JavaInfo] for d in scalac_provider.default_repl_classpath],
-        extra_jvm_flags = ctx.attr.scalacopts + ["-Dscala.usejavacp=true"],
+        extra_jvm_flags = ["-Dscala.usejavacp=true"],
+        extra_args = ctx.attr.scalacopts or [],
         override_main_class = "scala.tools.nsc.MainGenericRunner",
         executable_wrapper_preamble = """
 # save stty like in bin/scala
@@ -949,94 +946,28 @@ def scala_test_impl(ctx):
     if len(ctx.attr.suites) != 0:
         print("suites attribute is deprecated. All scalatest test suites are run")
 
-    scalac_provider = _scalac_provider(ctx)
-
-    unused_dependency_checker_mode = get_unused_dependency_checker_mode(ctx)
-    unused_dependency_checker_ignored_targets = [
-        target.label
-        for target in scalac_provider.default_classpath +
-                      ctx.attr.unused_dependency_checker_ignored_targets
-    ]
-    unused_dependency_checker_is_off = unused_dependency_checker_mode == "off"
-
-    jars = _collect_jars_from_common_ctx(
+    return impl_helper(
         ctx,
-        scalac_provider.default_classpath,
+        output_executable = ctx.outputs.executable,
+        output_jar = ctx.outputs.jar,
+        output_deploy_jar = ctx.outputs.deploy_jar,
+        output_statsfile = ctx.outputs.statsfile,
+        output_manifest = ctx.outputs.manifest,
+        output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
+        deps_enforcer_ignored_jars = ctx.attr._scalatest[JavaInfo].compile_jars,
+        extra_deps = [ctx.attr._scalatest[JavaInfo]],
         extra_runtime_deps = [
-            ctx.attr._scalatest_reporter,
-            ctx.attr._scalatest_runner,
+            ctx.attr._scalatest_reporter[JavaInfo],
+            ctx.attr._scalatest_runner[JavaInfo],
         ],
-        unused_dependency_checker_is_off = unused_dependency_checker_is_off,
+        extra_args = [
+            "-R",
+            ctx.outputs.jar.short_path,
+            _scala_test_flags(ctx),
+            "-C",
+            "io.bazel.rules.scala.JUnitXmlReporter",
+        ],
     )
-    (
-        cjars,
-        transitive_rjars,
-        transitive_compile_jars,
-        jars_to_labels,
-    ) = (
-        jars.compile_jars,
-        jars.transitive_runtime_jars,
-        jars.transitive_compile_jars,
-        jars.jars2labels,
-    )
-
-    # _scalatest is an http_jar, so its compile jar is run through ijar
-    # however, contains macros, so need to handle separately
-    scalatest_jars = collect_jars([ctx.attr._scalatest]).transitive_runtime_jars
-    cjars = depset(transitive = [cjars, scalatest_jars])
-    transitive_rjars = depset(transitive = [transitive_rjars, scalatest_jars])
-
-    if is_dependency_analyzer_on(ctx):
-        transitive_compile_jars = depset(
-            transitive = [scalatest_jars, transitive_compile_jars],
-        )
-        scalatest_jars_list = scalatest_jars.to_list()
-        j2l = jars_to_labels.jars_to_labels
-        add_labels_of_jars_to(
-            j2l,
-            ctx.attr._scalatest,
-            scalatest_jars_list,
-            scalatest_jars_list,
-        )
-        jars_to_labels = JarsToLabelsInfo(jars_to_labels = j2l)
-
-    elif not unused_dependency_checker_is_off:
-        j2l = jars_to_labels.jars_to_labels
-        add_labels_of_jars_to(
-            j2l,
-            ctx.attr._scalatest,
-            [],
-            scalatest_jars.to_list(),
-        )
-        jars_to_labels = JarsToLabelsInfo(jars_to_labels = j2l)
-
-    args = " ".join([
-        "-R \"{path}\"".format(path = ctx.outputs.jar.short_path),
-        _scala_test_flags(ctx),
-        "-C io.bazel.rules.scala.JUnitXmlReporter ",
-    ])
-
-    # main_class almost has to be "org.scalatest.tools.Runner" due to args....
-    wrapper = _write_java_wrapper(ctx, args, "")
-    out = _scala_binary_common(
-        ctx,
-        cjars,
-        transitive_rjars,
-        transitive_compile_jars,
-        jars_to_labels,
-        wrapper,
-        unused_dependency_checker_mode = unused_dependency_checker_mode,
-        unused_dependency_checker_ignored_targets =
-            unused_dependency_checker_ignored_targets,
-    )
-    _write_executable(
-        ctx = ctx,
-        rjars = out.transitive_rjars,
-        main_class = ctx.attr.main_class,
-        jvm_flags = ctx.attr.jvm_flags,
-        wrapper = wrapper,
-    )
-    return out
 
 def _gen_test_suite_flags_based_on_prefixes_and_suffixes(ctx, archives):
     return struct(
@@ -1072,81 +1003,49 @@ def _get_test_archive_jars(ctx, test_archives):
     return flattened_list
 
 def scala_junit_test_impl(ctx):
-    if (not (ctx.attr.prefixes) and not (ctx.attr.suffixes)):
-        fail(
-            "Setting at least one of the attributes ('prefixes','suffixes') is required",
-        )
-    scalac_provider = _scalac_provider(ctx)
+    if not (ctx.attr.prefixes or ctx.attr.suffixes):
+        fail("Setting at least one of the attributes ('prefixes','suffixes') is required")
 
-    unused_dependency_checker_mode = get_unused_dependency_checker_mode(ctx)
-    unused_dependency_checker_ignored_targets = [
-        target.label
-        for target in scalac_provider.default_classpath +
-                      ctx.attr.unused_dependency_checker_ignored_targets
-    ] + [
-        ctx.attr._junit.label,
-        ctx.attr._hamcrest.label,
-        ctx.attr.suite_label.label,
-        ctx.attr._bazel_test_runner.label,
-    ]
-    unused_dependency_checker_is_off = unused_dependency_checker_mode == "off"
-
-    jars = _collect_jars_from_common_ctx(
-        ctx,
-        scalac_provider.default_classpath,
-        extra_deps = [
-            ctx.attr._junit,
-            ctx.attr._hamcrest,
-            ctx.attr.suite_label,
-            ctx.attr._bazel_test_runner,
-        ],
-        unused_dependency_checker_is_off = unused_dependency_checker_is_off,
-    )
-    (cjars, transitive_rjars) = (jars.compile_jars, jars.transitive_runtime_jars)
-    implicit_junit_deps_needed_for_java_compilation = [
-        ctx.attr._junit,
-        ctx.attr._hamcrest,
-    ]
-
-    wrapper = _write_java_wrapper(ctx, "", "")
-    out = _scala_binary_common(
-        ctx,
-        cjars,
-        transitive_rjars,
-        jars.transitive_compile_jars,
-        jars.jars2labels,
-        wrapper,
-        implicit_junit_deps_needed_for_java_compilation =
-            implicit_junit_deps_needed_for_java_compilation,
-        unused_dependency_checker_mode = unused_dependency_checker_mode,
-        unused_dependency_checker_ignored_targets =
-            unused_dependency_checker_ignored_targets,
-    )
-
+    test_archives = []
     if ctx.attr.tests_from:
-        archives = _get_test_archive_jars(ctx, ctx.attr.tests_from)
+        for t in ctx.attr.tests_from:
+            test_archives += t[JavaInfo].runtime_output_jars
     else:
-        archives = [archive.class_jar for archive in out.scala.outputs.jars]
+        test_archives += [ctx.outputs.jar]
 
-    serialized_archives = _serialize_archives_short_path(archives)
-    test_suite = _gen_test_suite_flags_based_on_prefixes_and_suffixes(
-        ctx,
-        serialized_archives,
-    )
-    launcherJvmFlags = [
-        "-ea",
-        test_suite.archiveFlag,
-        test_suite.prefixesFlag,
-        test_suite.suffixesFlag,
-        test_suite.printFlag,
-        test_suite.testSuiteFlag,
+    extra_deps = [
+        ctx.attr._junit[JavaInfo],
+        ctx.attr._hamcrest[JavaInfo],
+        ctx.attr._bazel_test_runner[JavaInfo],
+        ctx.attr.suite_label[JavaInfo],
     ]
-    _write_executable(
-        ctx = ctx,
-        rjars = out.transitive_rjars,
-        main_class = "com.google.testing.junit.runner.BazelTestRunner",
-        jvm_flags = launcherJvmFlags + ctx.attr.jvm_flags,
-        wrapper = wrapper,
+    return impl_helper(
+        ctx,
+        output_executable = ctx.outputs.executable,
+        output_jar = ctx.outputs.jar,
+        output_deploy_jar = ctx.outputs.deploy_jar,
+        output_statsfile = ctx.outputs.statsfile,
+        output_manifest = ctx.outputs.manifest,
+        output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
+        override_main_class = "com.google.testing.junit.runner.BazelTestRunner",
+        deps_enforcer_ignored_jars = depset(transitive = [j.compile_jars for f in extra_deps]),
+        extra_deps = extra_deps,
+        extra_jvm_flags = [
+            "-ea",
+            "-Dbazel.test_suite=%s" % ctx.attr.suite_class,
+            "-Dbazel.discover.classes.archives.file.paths=%s" % ",".join([
+                f.short_path
+                for f in test_archives
+            ]),
+            "-Dbazel.discover.classes.prefixes=%s" % ",".join(ctx.attr.prefixes),
+            "-Dbazel.discover.classes.suffixes=%s" % ",".join(ctx.attr.suffixes),
+            "-Dbazel.discover.classes.print.discovered=%s" % ctx.attr.print_discovered_classes,
+        ],
+        extra_args = [
+            "-R",
+            ctx.outputs.jar.short_path,
+            _scala_test_flags(ctx),
+            "-C",
+            "io.bazel.rules.scala.JUnitXmlReporter",
+        ],
     )
-
-    return out

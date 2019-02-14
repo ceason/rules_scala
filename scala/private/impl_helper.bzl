@@ -12,9 +12,11 @@ def impl_helper(
 
         # list[JavaInfo]
         extra_deps = [],
+        extra_runtime_deps = [],
 
         # list[String]
         extra_jvm_flags = [],
+        extra_args = [],
 
         # File
         output_executable = None,
@@ -126,7 +128,7 @@ def impl_helper(
         neverlink = getattr(ctx.attr, "neverlink", False),
         deps = deps,
         exports = [d[JavaInfo] for d in ctx.attr.exports],
-        runtime_deps = [d[JavaInfo] for d in ctx.attr.runtime_deps],
+        runtime_deps = [d[JavaInfo] for d in ctx.attr.runtime_deps] + extra_runtime_deps,
         jdeps = output_jdeps,
     )
 
@@ -163,6 +165,7 @@ def impl_helper(
             classpath_jars = java_info.transitive_runtime_jars,
             main_class = main_class,
             extra_jvm_flags = extra_jvm_flags,
+            extra_args = extra_args,
             wrapper_preamble = executable_wrapper_preamble,
         )
 
