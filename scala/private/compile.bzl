@@ -81,7 +81,7 @@ def compile(
     # add provided plugins
     for p in plugins:
         compile_inputs += [p.transitive_runtime_jars]
-        args.add_all(
+        args.add_joined(
             "--scalac_opts",
             p.transitive_runtime_jars,
             join_with = ctx.configuration.host_path_separator,

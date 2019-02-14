@@ -34,6 +34,12 @@ _java_extension = ".java"
 _scala_extension = ".scala"
 _srcjar_extension = ".srcjar"
 
+def compile_scala(*args, **kwargs):
+    fail("Unimplemented.")
+
+def scala_export_to_java(*args, **kwargs):
+    fail("Unimplemented.")
+
 def _scalac_provider(ctx):
     return ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"].scalac_provider_attr[_ScalacProvider]
 
@@ -56,7 +62,6 @@ def scala_library_for_plugin_bootstrapping_impl(ctx):
         output_deploy_jar = ctx.outputs.deploy_jar,
         output_statsfile = ctx.outputs.statsfile,
         output_manifest = ctx.outputs.manifest,
-        output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
         use_ijar = False,
     )
 
@@ -177,7 +182,7 @@ def scala_junit_test_impl(ctx):
         output_manifest = ctx.outputs.manifest,
         output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
         override_main_class = "com.google.testing.junit.runner.BazelTestRunner",
-        deps_enforcer_ignored_jars = depset(transitive = [j.compile_jars for f in extra_deps]),
+        deps_enforcer_ignored_jars = depset(transitive = [j.compile_jars for j in extra_deps]),
         extra_deps = extra_deps,
         extra_jvm_flags = [
             "-ea",
@@ -189,12 +194,5 @@ def scala_junit_test_impl(ctx):
             "-Dbazel.discover.classes.prefixes=%s" % ",".join(ctx.attr.prefixes),
             "-Dbazel.discover.classes.suffixes=%s" % ",".join(ctx.attr.suffixes),
             "-Dbazel.discover.classes.print.discovered=%s" % ctx.attr.print_discovered_classes,
-        ],
-        extra_args = [
-            "-R",
-            ctx.outputs.jar.short_path,
-            _scala_test_flags(ctx),
-            "-C",
-            "io.bazel.rules.scala.JUnitXmlReporter",
         ],
     )

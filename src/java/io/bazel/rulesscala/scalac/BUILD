@@ -27,13 +27,6 @@ java_binary(
     ],
 )
 
-java_binary(
-    name = "wtf",
-    srcs = ["WtfTest.java"],
-    deps = [":scalac"],
-    main_class = "io.bazel.rulesscala.scalac.WtfTest"
-)
-
 filegroup(
     name = "scalac_files",
     srcs = [

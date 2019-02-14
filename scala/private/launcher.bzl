@@ -38,6 +38,8 @@ def launcher(
     if not main_class:
         fail("missing kwarg 'main_class'")
 
+    wrapper = ctx.actions.declare_file("%s_wrapper.sh" % output.basename, sibling = output)
+
     # write wrapper
     wrapper_preamble = wrapper_preamble or "exec "
     java_path = str(ctx.attr._java_runtime[java_common.JavaRuntimeInfo].java_executable_runfiles_path)
@@ -51,7 +53,7 @@ def launcher(
         content = """#!/usr/bin/env bash
 {wrapper_preamble}{javabin} "$@" {args}
 """.format(
-            preamble = wrapper_preamble,
+            wrapper_preamble = wrapper_preamble,
             javabin = javabin,
             args = " ".join([
                 _shell_quote_str(arg)

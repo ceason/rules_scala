@@ -102,7 +102,7 @@ def impl_helper(
         jars = [full_compile_jar] + getattr(ctx.files, "resource_jars", []),
         resource_strip_prefix = getattr(ctx.attr, "resource_strip_prefix", ""),
         resources = getattr(ctx.files, "resources", []),
-        classpath_resources = getattr(ctx.attr, "classpath_resources", []),
+        classpath_resources = getattr(ctx.files, "classpath_resources", []),
     )
 
     # create a srcs jar
@@ -127,7 +127,7 @@ def impl_helper(
         source_jar = srcjar,
         neverlink = getattr(ctx.attr, "neverlink", False),
         deps = deps,
-        exports = [d[JavaInfo] for d in ctx.attr.exports],
+        exports = [d[JavaInfo] for d in getattr(ctx.attr, "exports", [])],
         runtime_deps = [d[JavaInfo] for d in ctx.attr.runtime_deps] + extra_runtime_deps,
         jdeps = output_jdeps,
     )
@@ -170,8 +170,9 @@ def impl_helper(
         )
 
     default_info = DefaultInfo(
-        files = depset(direct = outputs, executable = output_executable),
+        files = depset(direct = outputs),
         runfiles = ctx.runfiles(collect_default = True),
+        executable = output_executable,
     )
     return struct(
         java = java_info,
