@@ -421,20 +421,18 @@ trap finish EXIT
 """,
     )
 
-def _scala_test_flags(ctx):
-    # output report test duration
-    flags = "-oD"
-    if ctx.attr.full_stacktraces:
-        flags += "F"
-    else:
-        flags += "S"
-    if not ctx.attr.colors:
-        flags += "W"
-    return flags
-
 def scala_test_impl(ctx):
     if len(ctx.attr.suites) != 0:
         print("suites attribute is deprecated. All scalatest test suites are run")
+
+    # output report test duration
+    scalatest_flags = "-oD"
+    if ctx.attr.full_stacktraces:
+        scalatest_flags += "F"
+    else:
+        scalatest_flags += "S"
+    if not ctx.attr.colors:
+        scalatest_flags += "W"
 
     return impl_helper(
         ctx,
@@ -453,7 +451,7 @@ def scala_test_impl(ctx):
         extra_args = [
             "-R",
             ctx.outputs.jar.short_path,
-            _scala_test_flags(ctx),
+            scalatest_flags,
             "-C",
             "io.bazel.rules.scala.JUnitXmlReporter",
         ],
