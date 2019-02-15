@@ -34,6 +34,7 @@ def impl_helper(
         deps_enforcer_ignored_jars = None,
 
         # list[JavaInfo]
+        extra_exports = [],
         extra_deps = [],
         extra_runtime_deps = [],
 
@@ -76,23 +77,15 @@ def impl_helper(
         else:
             fail("Invalid file type, wanted '.java .scala .srcjar' but got '%s'" % f.basename)
     deps = [tc.runtime] + extra_deps + [d[JavaInfo] for d in getattr(ctx.attr, "deps", [])]
-    exports = [d[JavaInfo] for d in getattr(ctx.attr, "exports", [])]
+    exports = [d[JavaInfo] for d in getattr(ctx.attr, "exports", [])] + extra_exports
     runtime_deps = [d[JavaInfo] for d in getattr(ctx.attr, "runtime_deps", [])] + extra_runtime_deps
+    resource_jars = getattr(ctx.files, "resource_jars", [])
+    resource_strip_prefix = getattr(ctx.attr, "resource_strip_prefix", "")
+    resources = getattr(ctx.files, "resources", [])
+    classpath_resources = getattr(ctx.files, "classpath_resources", [])
 
-    # if there are no srcs, just accumulate whatever _does_ exist
-    if not (source_files or source_jars):
-        pack_jar(ctx, output = output_jar, deploy_manifest_lines = [
-            "Target-Label: %s" % str(ctx.label),
-        ])
-        ctx.actions.write(output_statsfile, "")
-        java_info = JavaInfo(
-            output_jar = output_jar,
-            compile_jar = output_jar,
-            deps = deps,
-            runtime_deps = runtime_deps,
-            exports = exports,
-        )
-    else:
+    if source_files or source_jars:
+        # there are srcs, so compile them
         java_info = compile(
             ctx,
             source_jars = source_jars,
@@ -119,6 +112,39 @@ def impl_helper(
             resource_strip_prefix = getattr(ctx.attr, "resource_strip_prefix", ""),
             resources = getattr(ctx.files, "resources", []),
             classpath_resources = getattr(ctx.files, "classpath_resources", []),
+            use_ijar = use_ijar
+        )
+    elif resource_jars or resources or classpath_resources:
+        # there are only resources, so pack them into a jar
+        pack_jar(
+            ctx,
+            output = output_jar,
+            deploy_manifest_lines = ["Target-Label: %s" % str(ctx.label)],
+            resources = resources,
+            classpath_resources = classpath_resources,
+            jars = resource_jars,
+            resource_strip_prefix = resource_strip_prefix,
+        )
+        ctx.actions.write(output_statsfile, "")
+        java_info = JavaInfo(
+            output_jar = output_jar,
+            compile_jar = output_jar,
+            deps = deps,
+            runtime_deps = runtime_deps,
+            exports = exports,
+        )
+    else:
+        # there's no content for the jar, so make an empty jar
+        pack_jar(ctx, output = output_jar, deploy_manifest_lines = [
+            "Target-Label: %s" % str(ctx.label),
+        ])
+        ctx.actions.write(output_statsfile, "")
+        java_info = JavaInfo(
+            output_jar = output_jar,
+            compile_jar = output_jar,
+            deps = deps,
+            runtime_deps = runtime_deps,
+            exports = exports,
         )
 
     # TODO: migration for non-JavaInfo plugins

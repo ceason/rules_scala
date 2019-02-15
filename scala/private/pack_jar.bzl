@@ -1,23 +1,26 @@
-def _resource_dest_path(file, resource_strip_prefix):
+def _resource_dest_path(ctx, file, resource_strip_prefix):
+    tgt_path = file.short_path
+    if tgt_path.startswith("../"):
+        tgt_path = "external/%s" % tgt_path[len("../"):]
     if resource_strip_prefix:
-        if not file.short_path.startswith(resource_strip_prefix):
+        if not tgt_path.startswith(resource_strip_prefix):
             fail("Resource file %s is not under the specified prefix to strip" % file.short_path)
-        clean_path = file.short_path[len(resource_strip_prefix):]
-        return clean_path
+        clean_path = tgt_path[len(resource_strip_prefix):]
+        return clean_path.lstrip("/")
 
     #  Here we are looking to find out the offset of this resource inside
     #  any resources folder. We want to return the root to the resources folder
     #  and then the sub path inside it
-    dir_1, dir_2, rel_path = file.short_path.partition("resources/")
+    dir_1, dir_2, rel_path = tgt_path.partition("resources")
     if rel_path:
-        return rel_path
+        return rel_path.lstrip("/")
 
     #  The same as the above but just looking for java
-    (dir_1, dir_2, rel_path) = file.short_path.partition("java")
+    (dir_1, dir_2, rel_path) = tgt_path.partition("java")
     if rel_path:
-        return rel_path
+        return rel_path.lstrip("/")
 
-    return file.short_path
+    return tgt_path.lstrip("/")
 
 # Wrapper for @bazel_tools//src/tools/singlejar
 # Use to combine resources & compiled sources
@@ -70,7 +73,7 @@ def pack_jar(
     )
     args.add_all("--sources", input_jars)
     args.add_all("--resources", [
-        "%s:%s" % (f.path, _resource_dest_path(f, resource_strip_prefix))
+        "%s:%s" % (f.path, _resource_dest_path(ctx, f, resource_strip_prefix))
         for f in resources
     ])
 

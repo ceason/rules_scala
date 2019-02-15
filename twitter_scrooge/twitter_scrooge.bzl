@@ -268,19 +268,12 @@ def _scrooge_aspect_impl(target, ctx):
             ctx,
             extra_srcs = [scrooge_file],
             extra_deps = imps,
+            extra_exports = imps,
             output_jar = output,
             output_statsfile = statsfile,
             override_strict_deps = "off",
             override_unused_deps = "off",
         ).java
-        #        java_info = _compile_scala(
-        #            ctx,
-        #            target.label,
-        #            output,
-        #            scrooge_file,
-        #            deps,
-        #            imps,
-        #        )
 
     else:
         # this target is only an aggregation target
@@ -315,9 +308,6 @@ scrooge_aspect = aspect(
         "_implicit_compile_deps": attr.label_list(
             providers = [JavaInfo],
             default = [
-                Label(
-                    "//external:io_bazel_rules_scala/dependency/scala/scala_library",
-                ),
                 Label(
                     "//external:io_bazel_rules_scala/dependency/thrift/libthrift",
                 ),
@@ -356,6 +346,7 @@ scrooge_aspect = aspect(
         [ThriftInfo],
         [ScroogeImport],
     ],
+    fragments = ["java"],
     toolchains = ["@io_bazel_rules_scala//scala:toolchain_type"],
 )
 

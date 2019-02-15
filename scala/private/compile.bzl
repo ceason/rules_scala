@@ -206,7 +206,7 @@ def compile(
         output_jdeps = ctx.actions.declare_file("%s.jdeps" % output.basename[:-len(".jar")], sibling = output)
 
     # compile scala
-    scalac_output = ctx.actions.declare_file("%s-scala-class.jar" % output.basename[:-len(".jar")], sibling = output)
+    scalac_output = ctx.actions.declare_file("%s-class.jar" % output.basename[:-len(".jar")], sibling = output)
     scalac(
         ctx,
         source_jars = source_jars,
@@ -218,17 +218,16 @@ def compile(
         **kwargs
     )
 
-    # maybe compile java
-    full_compile_jar = scalac_output  # this might be overridden if we're outputting java too
+    # maybe compile java, unless it's been explicitly turned off
     java_files = [f for f in source_files if f.extension == "java"]
-    if java_files or getattr(ctx.attr, "expect_java_output", False):
-        javac_output = ctx.actions.declare_file("%s-java-class.jar" % output.basename[:-len(".jar")], sibling = output)
+    if (java_files or source_jars) and getattr(ctx.attr, "expect_java_output", True):
+        javac_output = ctx.actions.declare_file("%s_java-class.jar" % output.basename[:-len(".jar")], sibling = output)
         java_common.compile(
             ctx,
             source_jars = source_jars,
             source_files = java_files,
             output = javac_output,
-            javac_opts = ctx.attr.javacopts,
+            javac_opts = getattr(ctx.attr, "javacopts", []),
             deps = deps + [JavaInfo(compile_jar = scalac_output, output_jar = scalac_output)],
             java_toolchain = ctx.attr._java_toolchain,
             host_javabase = ctx.attr._host_javabase,
@@ -242,6 +241,8 @@ def compile(
             output = full_compile_jar,
             jars = [scalac_output, javac_output],
         )
+    else:
+        full_compile_jar = scalac_output
 
     # pack the compiled jar with resources
     pack_jar(

@@ -98,9 +98,6 @@ scala_import = rule(
         "exports": attr.label_list(providers = [JavaInfo]),
         "neverlink": attr.bool(),
         "srcjar": attr.label(allow_single_file = True),
-        "_java_toolchain": attr.label(
-            default = Label("@bazel_tools//tools/jdk:current_java_toolchain"),
-        ),
         "_singlejar": attr.label(
             executable = True,
             cfg = "host",
