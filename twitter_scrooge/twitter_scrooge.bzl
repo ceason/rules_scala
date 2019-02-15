@@ -12,7 +12,7 @@ load(
     "//scala/private:common.bzl",
     "write_manifest_file",
 )
-load("//scala/private:rule_impls.bzl", "compile_scala")
+load("//scala/private:impl_helper.bzl", "impl_helper")
 load("@io_bazel_rules_scala//thrift:thrift_info.bzl", "ThriftInfo")
 load(
     "@io_bazel_rules_scala//thrift:thrift.bzl",
@@ -20,7 +20,6 @@ load(
 )
 
 _jar_extension = ".jar"
-
 
 def twitter_scrooge(
         scala_version = _default_scala_version(),
@@ -201,59 +200,6 @@ def _compiled_jar_file(actions, scrooge_jar):
     compiled_jar = without_suffix + "jar"
     return actions.declare_file(compiled_jar, sibling = scrooge_jar)
 
-def _compile_scala(
-        ctx,
-        label,
-        output,
-        scrooge_jar,
-        deps_java_info,
-        implicit_deps):
-    manifest = ctx.actions.declare_file(
-        label.name + "_MANIFEST.MF",
-        sibling = scrooge_jar,
-    )
-    write_manifest_file(ctx.actions, manifest, None)
-    statsfile = ctx.actions.declare_file(
-        label.name + "_scalac.statsfile",
-        sibling = scrooge_jar,
-    )
-    merged_deps = java_common.merge(deps_java_info + implicit_deps)
-
-    # this only compiles scala, not the ijar, but we don't
-    # want the ijar for generated code anyway: any change
-    # in the thrift generally will change the interface and
-    # method bodies
-    compile_scala(
-        ctx,
-        label,
-        output,
-        manifest,
-        statsfile,
-        sources = [],
-        cjars = merged_deps.transitive_compile_time_jars,
-        all_srcjars = depset([scrooge_jar]),
-        transitive_compile_jars = merged_deps.transitive_compile_time_jars,
-        plugins = [],
-        resource_strip_prefix = "",
-        resources = [],
-        resource_jars = [],
-        labels = {},
-        in_scalacopts = [],
-        print_compile_time = False,
-        expect_java_output = False,
-        scalac_jvm_flags = [],
-        scalac = ctx.attr._scalac,
-    )
-
-    return JavaInfo(
-        source_jar = scrooge_jar,
-        deps = deps_java_info + implicit_deps,
-        runtime_deps = deps_java_info + implicit_deps,
-        exports = deps_java_info + implicit_deps,
-        output_jar = output,
-        compile_jar = output,
-    )
-
 def _empty_java_info(deps_java_info, implicit_deps):
     merged_deps = java_common.merge(deps_java_info + implicit_deps)
     return java_common.create_provider(
@@ -313,15 +259,28 @@ def _scrooge_aspect_impl(target, ctx):
 
         src_jars = depset([scrooge_file])
         output = _compiled_jar_file(ctx.actions, scrooge_file)
-        outs = depset([output])
-        java_info = _compile_scala(
-            ctx,
-            target.label,
-            output,
-            scrooge_file,
-            deps,
-            imps,
+        statsfile = ctx.actions.declare_file(
+            ctx.label.name + "_scalac.statsfile",
+            sibling = output,
         )
+        outs = depset([output])
+        java_info = impl_helper(
+            ctx,
+            extra_srcs = [scrooge_file],
+            extra_deps = imps,
+            output_jar = output,
+            output_statsfile = statsfile,
+            override_strict_deps = "off",
+            override_unused_deps = "off",
+        ).java
+        #        java_info = _compile_scala(
+        #            ctx,
+        #            target.label,
+        #            output,
+        #            scrooge_file,
+        #            deps,
+        #            imps,
+        #        )
 
     else:
         # this target is only an aggregation target
@@ -369,6 +328,28 @@ scrooge_aspect = aspect(
                     "//external:io_bazel_rules_scala/dependency/thrift/util_core",
                 ),
             ],
+        ),
+        "_singlejar": attr.label(
+            executable = True,
+            cfg = "host",
+            default = Label("@bazel_tools//tools/jdk:singlejar"),
+            allow_files = True,
+        ),
+        "_zipper": attr.label(
+            executable = True,
+            cfg = "host",
+            default = Label("@bazel_tools//tools/zip:zipper"),
+            allow_files = True,
+        ),
+        "_java_toolchain": attr.label(
+            default = Label("@bazel_tools//tools/jdk:current_java_toolchain"),
+        ),
+        "_host_javabase": attr.label(
+            default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
+            cfg = "host",
+        ),
+        "_java_runtime": attr.label(
+            default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
         ),
     },
     required_aspect_providers = [

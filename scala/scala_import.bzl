@@ -69,7 +69,15 @@ def _scala_import_impl(ctx):
         neverlink = anyjar.neverlink,
         deps = [d[JavaInfo] for d in getattr(ctx.attr, "deps", [])],
         runtime_deps = [d[JavaInfo] for d in getattr(ctx.attr, "runtime_deps", [])],
-        exports = [d[JavaInfo] for d in getattr(ctx.attr, "exports", [])] + jars,
+        exports = [d[JavaInfo] for d in getattr(ctx.attr, "exports", [])] + [
+            JavaInfo(
+                output_jar = j.output_jar,
+                compile_jar = j.compile_jar,
+                source_jar = j.source_jar,
+                neverlink = j.neverlink,
+            )
+            for j in jars
+        ],
     )
     return struct(
         scala = java_info,
@@ -85,9 +93,9 @@ scala_import = rule(
         "jars": attr.label_list(
             allow_files = True,
         ),  #current hidden assumption is that these point to full, not ijar'd jars
-        "deps": attr.label_list(),
-        "runtime_deps": attr.label_list(),
-        "exports": attr.label_list(),
+        "deps": attr.label_list(providers = [JavaInfo]),
+        "runtime_deps": attr.label_list(providers = [JavaInfo]),
+        "exports": attr.label_list(providers = [JavaInfo]),
         "neverlink": attr.bool(),
         "srcjar": attr.label(allow_single_file = True),
         "_java_toolchain": attr.label(
