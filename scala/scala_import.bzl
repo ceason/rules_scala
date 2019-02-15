@@ -48,12 +48,10 @@ def _scala_import_impl(ctx):
     jars = []
     for prefix, jar in jar_files.items():
         source_jar = srcjar_files.get(prefix, default = srcjar)
-        compile_jar = java_common.stamp_jar(
-            ctx.actions,
-            jar = jar,
-            target_label = ctx.label,
-            java_toolchain = ctx.attr._java_toolchain,
-        )
+        compile_jar = ctx.actions.declare_file("_scala_import/%s-stamped.jar" % jar.short_path)
+        pack_jar(ctx, output = compile_jar, deploy_manifest_lines = [
+            "Target-Label: %s" % str(ctx.label),
+        ], jars = [jar])
         jars += [struct(
             output_jar = jar,
             compile_jar = compile_jar,
