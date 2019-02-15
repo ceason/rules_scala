@@ -141,7 +141,7 @@ def scala_test_impl(ctx):
         output_statsfile = ctx.outputs.statsfile,
         output_manifest = ctx.outputs.manifest,
         output_jdeps = ctx.actions.declare_file("%s.jdeps" % ctx.outputs.jar.basename[:-len(".jar")]),
-        deps_enforcer_ignored_jars = ctx.attr._scalatest[JavaInfo].compile_jars,
+        deps_enforcer_ignored_jars = ctx.attr._scalatest[JavaInfo].transitive_compile_time_jars,
         extra_deps = [ctx.attr._scalatest[JavaInfo]],
         extra_runtime_deps = [
             ctx.attr._scalatest_reporter[JavaInfo],

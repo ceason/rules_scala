@@ -3,7 +3,7 @@ package third_party.scala_jdeps
 import java.io.File
 
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
+import scala.util.Try
 
 
 /**
@@ -36,6 +36,12 @@ class Config(args: List[String]) {
   require(output != null, "Must provide '-P:scala-jdeps:output:<outputPath>' arg")
   require(currentTarget != null, "Must provide '-P:scala-jdeps:current-target:<targetLabel>' arg")
 
+  var directLabels: Set[String] = directJars.toSet.flatMap { path: String =>
+    Try(ScalaJdeps.getTargetFromJar(path)).toOption
+  }
+  var ignoredLabels: Set[String] = ignoredJars.toSet.flatMap { path: String =>
+    Try(ScalaJdeps.getTargetFromJar(path)).toOption
+  }
 }
 
 object Config {

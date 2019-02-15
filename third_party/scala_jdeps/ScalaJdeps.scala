@@ -38,7 +38,7 @@ class ScalaJdeps(val global: Global) extends Plugin {
     override def newPhase(prev: Phase): StdPhase = new StdPhase(prev) {
       override def run(): Unit = {
         super.run()
-        val usedJars = findUsedJars
+        val usedJars = findUsedJars.intersect(cfg.classpathJars)
         enforceUnusedDeps(usedJars)
         enforceStrictDeps(usedJars)
         val jdeps = buildJdeps(usedJars)
@@ -82,8 +82,8 @@ object ScalaJdeps {
     c.directJars
       .filterNot(usedJars.contains)
       .filterNot(c.ignoredJars.contains)
-      .filter(c.classpathJars.contains)
       .map(getTargetFromJar)
+      .filterNot(c.ignoredLabels.contains)
       .map { target =>
         s"""Target '$target' is specified as a dependency to ${c.currentTarget} but isn't used, please remove it from the deps.
            |You can use the following buildozer command:
@@ -92,7 +92,7 @@ object ScalaJdeps {
       }.foreach { errMsg =>
       c.unusedDeps match {
         case EnforcementMode.Error => g.reporter.error(g.NoPosition, errMsg)
-        case EnforcementMode.Warn => g.reporter.warning(g.NoPosition, errMsg)
+        case EnforcementMode.Warn => g.reporter.info(g.NoPosition, errMsg, force = true)
         case _ =>
       }
     }
@@ -105,8 +105,8 @@ object ScalaJdeps {
     usedJars.toSeq
       .filterNot(c.directJars.contains)
       .filterNot(c.ignoredJars.contains)
-      .filter(c.classpathJars.contains)
       .map(getTargetFromJar)
+      .filterNot(c.directLabels.contains)
       .map { target =>
         s"""Target '$target' is used but isn't explicitly declared, please add it to the deps.
            |You can use the following buildozer command:
@@ -120,7 +120,7 @@ object ScalaJdeps {
     }
   }
 
-  private def getTargetFromJar(jarPath: String): String = {
+  protected[scala_jdeps] def getTargetFromJar(jarPath: String): String = {
     // extract target label from jar
     val jar = new JarFile(jarPath)
     val targetLabel = Option(jar.getManifest

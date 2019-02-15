@@ -1,10 +1,10 @@
 load(":aspect.bzl", "aspect_test")
 load(
     "//scala:scala.bzl",
-    "scala_library",
-    "scala_test",
     "scala_junit_test",
+    "scala_library",
     "scala_specs2_junit_test",
+    "scala_test",
 )
 
 aspect_test(
@@ -17,9 +17,15 @@ aspect_test(
     ],
 )
 
-scala_library(name = "scala_library")
+scala_library(
+    name = "scala_library",
+    srcs = ["Empty.scala"],
+)
 
-scala_test(name = "scala_test")
+scala_test(
+    name = "scala_test",
+    srcs = ["Empty.scala"],
+)
 
 scala_junit_test(
     name = "scala_junit_test",

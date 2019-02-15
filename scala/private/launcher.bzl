@@ -113,6 +113,6 @@ def launcher(
         """,
     )
     return depset(
-        direct = [wrapper],
+        direct = [wrapper, output] + ctx.files._java_runtime,
         transitive = [classpath_jars],
     )

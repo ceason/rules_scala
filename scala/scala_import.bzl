@@ -31,6 +31,18 @@ def _scala_import_impl(ctx):
                 output_files += [jar]
                 jar_files[prefix] = jar
 
+    # create a "fake/empty" jar if none were provided (because the
+    #   JavaInfo constructor requires one..)
+    if not jar_files:
+        # TODO: maybe deprecate nat providing jars??
+        #print("scala_import: 'jars' is empty, it will be a required field in the future'")
+        fakejar = ctx.actions.declare_file("lib%s.jar" % ctx.attr.name)
+        output_files += [fakejar]
+        pack_jar(ctx, output = fakejar, deploy_manifest_lines = [
+            "Target-Label: %s" % str(ctx.label),
+        ])
+        jar_files[fakejar.path[:-len(".jar")]] = fakejar
+
     # create stuff from jars, pairing them with
     #   stamped compilejars (and srcjars if possible)
     jars = []
@@ -46,17 +58,8 @@ def _scala_import_impl(ctx):
             output_jar = jar,
             compile_jar = compile_jar,
             source_jar = source_jar,
+            neverlink = ctx.attr.neverlink,
         )]
-
-    # create a "fake/empty" jar if none were provided (because the
-    #   JavaInfo constructor requires one..)
-    if not jars:
-        # TODO: maybe deprecate nat providing jars??
-        #print("scala_import: 'jars' is empty, it will be a required field in the future'")
-        fakejar = ctx.actions.declare_file("lib%s.jar" % ctx.attr.name)
-        pack_jar(ctx, output = fakejar)
-        jars += [struct(output_jar = fakejar, compile_jar = fakejar, source_jar = None)]
-        output_files += [fakejar]
 
     # grab any jar (doesn't matter which) just to make JavaInfo's constructor happy
     #  and use it to construct the returned provider
@@ -65,17 +68,10 @@ def _scala_import_impl(ctx):
         output_jar = anyjar.output_jar,
         compile_jar = anyjar.compile_jar,
         source_jar = anyjar.source_jar,
-        neverlink = ctx.attr.neverlink,
+        neverlink = anyjar.neverlink,
         deps = [d[JavaInfo] for d in getattr(ctx.attr, "deps", [])],
         runtime_deps = [d[JavaInfo] for d in getattr(ctx.attr, "runtime_deps", [])],
-        exports = [d[JavaInfo] for d in getattr(ctx.attr, "exports", [])] + [
-            JavaInfo(
-                output_jar = j.output_jar,
-                compile_jar = j.compile_jar,
-                source_jar = j.source_jar,
-            )
-            for j in jars
-        ],
+        exports = [d[JavaInfo] for d in getattr(ctx.attr, "exports", [])] + jars,
     )
     return struct(
         scala = java_info,
