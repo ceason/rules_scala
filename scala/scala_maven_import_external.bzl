@@ -232,7 +232,7 @@ def scala_maven_import_external(
         artifact,
         server_urls,
         rule_load = "load(\"@io_bazel_rules_scala//scala:scala_import.bzl\", \"scala_import\")",
-        fetch_sources = False,
+        fetch_sources = True,
         **kwargs):
     jvm_maven_import_external(
         rule_name = "scala_import",
@@ -248,7 +248,7 @@ def scala_maven_import_external(
 def jvm_maven_import_external(
         artifact,
         server_urls,
-        fetch_sources = False,
+        fetch_sources = True,
         **kwargs):
     if kwargs.get("srcjar_urls") and fetch_sources:
         fail("Either use srcjar_urls or fetch_sources but not both")
