@@ -62,7 +62,7 @@ def impl_helper(
         strict_deps_mode = strict_deps,
         deps_enforcer_ignored_jars = depset(
             transitive = (
-                deps_enforcer_ignored_jars or []
+                [deps_enforcer_ignored_jars] if deps_enforcer_ignored_jars else []
             ) + [
                 d[JavaInfo].compile_jars
                 for d in getattr(ctx.attr, "unused_dependency_checker_ignored_targets", [])
@@ -157,9 +157,10 @@ def impl_helper(
         )
 
     outputs = [output_jar]
+    executable_runfiles = None
     if output_executable:
         outputs += [output_executable]
-        launcher(
+        executable_runfiles = launcher(
             ctx,
             output = output_executable,
             classpath_jars = java_info.transitive_runtime_jars,
@@ -171,7 +172,7 @@ def impl_helper(
 
     default_info = DefaultInfo(
         files = depset(direct = outputs),
-        runfiles = ctx.runfiles(collect_default = True),
+        runfiles = ctx.runfiles(collect_default = True, transitive_files = executable_runfiles),
         executable = output_executable,
     )
     return struct(

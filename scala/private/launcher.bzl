@@ -20,6 +20,8 @@ def _format_classpath_jar(file):
 def _shell_quote_str(s):
     return "'%s'" % s.replace("'", "\'")
 
+# Creates a launcher
+# Returns a depset of files needed at runtime
 def launcher(
         ctx,
         # File
@@ -98,6 +100,7 @@ def launcher(
             "TEMPLATE": template.path,
             "OUT": output.path,
         },
+        arguments = [args],
         command = """#!/usr/bin/env bash
         set -euo pipefail
         content="$(cat "$TEMPLATE")"
@@ -108,4 +111,8 @@ def launcher(
         done
         echo -n "$content" > "$OUT"
         """,
+    )
+    return depset(
+        direct = [wrapper],
+        transitive = [classpath_jars],
     )

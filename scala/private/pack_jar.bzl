@@ -35,6 +35,9 @@ def pack_jar(
         main_class = None,
         resource_strip_prefix = None,
 
+        # list[String]
+        deploy_manifest_lines = [],
+
         # list[File]
         resources = [],
         classpath_resources = [],
@@ -44,8 +47,6 @@ def pack_jar(
         transitive_jars = None):
     if not output:
         fail("Must provide 'output' kwarg")
-    if not (resources or classpath_resources or jars or transitive_jars):
-        fail("Must provide nonempty input to pack_jar")
 
     # set resource paths per:
     #  https://docs.bazel.build/versions/master/be/java.html#java_library
@@ -61,6 +62,7 @@ def pack_jar(
     if main_class:
         args.add("--main_class", main_class)
 
+    args.add_all("--deploy_manifest_lines", deploy_manifest_lines)
     args.add_all("--classpath_resources", classpath_resources)
     input_jars = depset(
         direct = jars,
