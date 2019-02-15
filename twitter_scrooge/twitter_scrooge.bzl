@@ -267,7 +267,7 @@ def _scrooge_aspect_impl(target, ctx):
         java_info = impl_helper(
             ctx,
             extra_srcs = [scrooge_file],
-            extra_deps = imps,
+            extra_deps = imps + deps,
             extra_exports = imps,
             output_jar = output,
             output_statsfile = statsfile,

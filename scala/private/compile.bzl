@@ -221,7 +221,7 @@ def compile(
     # maybe compile java, unless it's been explicitly turned off
     java_files = [f for f in source_files if f.extension == "java"]
     if (java_files or source_jars) and getattr(ctx.attr, "expect_java_output", True):
-        javac_output = ctx.actions.declare_file("%s_java-class.jar" % output.basename[:-len(".jar")], sibling = output)
+        javac_output = ctx.actions.declare_file("%s-java-class.jar" % output.basename[:-len(".jar")], sibling = output)
         java_common.compile(
             ctx,
             source_jars = source_jars,
@@ -235,7 +235,7 @@ def compile(
         )
 
         # combine the java and scala compiled jars
-        full_compile_jar = ctx.actions.declare_file("%s-class.jar" % output.basename[:-len(".jar")], sibling = output)
+        full_compile_jar = ctx.actions.declare_file("%s-merged-class.jar" % output.basename[:-len(".jar")], sibling = output)
         pack_jar(
             ctx,
             output = full_compile_jar,

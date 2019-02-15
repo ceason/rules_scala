@@ -1,11 +1,12 @@
 package third_party.scala_jdeps
 
 import java.io.FileOutputStream
-import java.util.jar.JarFile
+import java.util.jar.{JarEntry, JarFile}
 
 import com.google.devtools.build.lib.view.proto.Deps.{Dependencies, Dependency}
 import third_party.scala_jdeps.Config.EnforcementMode
 import third_party.scala_jdeps.ScalaJdeps._
+import scala.collection.JavaConverters._
 
 import scala.tools.nsc.plugins.{Plugin, PluginComponent}
 import scala.tools.nsc.{Global, Phase}
@@ -82,6 +83,7 @@ object ScalaJdeps {
     c.directJars
       .filterNot(usedJars.contains)
       .filterNot(c.ignoredJars.contains)
+      .filter(jarHasClassfiles)
       .map(getTargetFromJar)
       .filterNot(c.ignoredLabels.contains)
       .map { target =>
@@ -105,6 +107,7 @@ object ScalaJdeps {
     usedJars.toSeq
       .filterNot(c.directJars.contains)
       .filterNot(c.ignoredJars.contains)
+      .filter(jarHasClassfiles)
       .map(getTargetFromJar)
       .filterNot(c.directLabels.contains)
       .map { target =>
@@ -118,6 +121,15 @@ object ScalaJdeps {
         case _ =>
       }
     }
+  }
+
+  // We want to ignore jars that don't actually have any classfiles in them
+  protected[scala_jdeps] def jarHasClassfiles(jarPath: String): Boolean = {
+    val jar = new JarFile(jarPath)
+    val hasClassfiles = jar.stream().iterator().asScala
+      .exists(_.getName.endsWith(".class"))
+    jar.close()
+    hasClassfiles
   }
 
   protected[scala_jdeps] def getTargetFromJar(jarPath: String): String = {
