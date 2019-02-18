@@ -115,6 +115,7 @@ object ScalaJdeps {
       .filterNot(c.ignoredJars.contains)
       .filter(jarHasClassfiles)
       .map(getTargetFromJar)
+      .map(resolveExportedLabel)
       .filterNot(c.directLabels.contains)
       .map { target =>
         s"""Target '$target' is used but isn't explicitly declared, please add it to the deps.
