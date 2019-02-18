@@ -7,15 +7,16 @@ load(
     "scala_test",
 )
 
-aspect_test(
-    name = "aspect_test",
-    targets = [
-        ":scala_library",
-        ":scala_test",
-        ":scala_junit_test",
-        ":scala_specs2_junit_test",
-    ],
-)
+# No longer necessary since compiler now links in `ctx.attr._scala_toolchain`
+#aspect_test(
+#    name = "aspect_test",
+#    targets = [
+#        ":scala_library",
+#        ":scala_test",
+#        ":scala_junit_test",
+#        ":scala_specs2_junit_test",
+#    ],
+#)
 
 scala_library(
     name = "scala_library",

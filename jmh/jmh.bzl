@@ -70,7 +70,7 @@ def _scala_construct_runtime_classpath(deps):
     return depset(transitive = files)
 
 def _scala_generate_benchmark(ctx):
-    class_jar = ctx.attr.src.scala.outputs.class_jar
+    class_jar = ctx.attr.src.scala.outputs.jars[0].class_jar
     classpath = _scala_construct_runtime_classpath([ctx.attr.src])
     ctx.actions.run(
         outputs = [ctx.outputs.src_jar, ctx.outputs.resource_jar],

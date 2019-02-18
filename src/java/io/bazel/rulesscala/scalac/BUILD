@@ -4,7 +4,21 @@ load(
 )
 
 _export_scalac_repositories_from_toolchain_to_jvm(
-    name = "exported_scalac_repositories_from_toolchain_to_jvm",
+    name = "current_classpath",
+    exported_attr = "default_classpath",
+    visibility = ["//visibility:public"],
+)
+
+_export_scalac_repositories_from_toolchain_to_jvm(
+    name = "current_macro_classpath",
+    exported_attr = "default_macro_classpath",
+    visibility = ["//visibility:public"],
+)
+
+_export_scalac_repositories_from_toolchain_to_jvm(
+    name = "current_repl_classpath",
+    exported_attr = "default_repl_classpath",
+    visibility = ["//visibility:public"],
 )
 
 java_binary(
@@ -19,11 +33,9 @@ java_binary(
     main_class = "io.bazel.rulesscala.scalac.ScalaCInvoker",
     visibility = ["//visibility:public"],
     deps = [
-        ":exported_scalac_repositories_from_toolchain_to_jvm",
+        ":current_repl_classpath",
         "@io_bazel_rules_scala//src/java/com/google/devtools/build/lib:worker",
-#        "@io_bazel_rules_scala//src/java/io/bazel/rulesscala/jar",
         "@io_bazel_rules_scala//src/java/io/bazel/rulesscala/worker",
-#        "@scalac_rules_commons_io//jar",
     ],
 )
 
@@ -31,7 +43,6 @@ filegroup(
     name = "scalac_files",
     srcs = [
         "CompileOptions.java",
-#        "Resource.java",
         "ScalaCInvoker.java",
         "ScalacProcessor.java",
     ],

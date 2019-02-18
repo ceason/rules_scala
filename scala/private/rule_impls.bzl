@@ -30,13 +30,6 @@ load(
 load("@io_bazel_rules_scala//scala:jars_to_labels.bzl", "JarsToLabelsInfo")
 load(":impl_helper.bzl", "impl_helper")
 
-_java_extension = ".java"
-_scala_extension = ".scala"
-_srcjar_extension = ".srcjar"
-
-def _scalac_provider(ctx):
-    return ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"].scalac_provider_attr[_ScalacProvider]
-
 def scala_library_impl(ctx):
     return impl_helper(
         ctx,
@@ -58,7 +51,6 @@ def scala_library_for_plugin_bootstrapping_impl(ctx):
     )
 
 def scala_macro_library_impl(ctx):
-    scalac_provider = _scalac_provider(ctx)
     return impl_helper(
         ctx,
         output_jar = ctx.outputs.jar,
@@ -66,11 +58,9 @@ def scala_macro_library_impl(ctx):
         output_statsfile = ctx.outputs.statsfile,
         output_manifest = ctx.outputs.manifest,
         use_ijar = False,
-        extra_deps = [d[JavaInfo] for d in scalac_provider.default_macro_classpath],
     )
 
 def scala_binary_impl(ctx):
-    scalac_provider = _scalac_provider(ctx)
     return impl_helper(
         ctx,
         output_executable = ctx.outputs.executable,
@@ -78,10 +68,10 @@ def scala_binary_impl(ctx):
         output_deploy_jar = ctx.outputs.deploy_jar,
         output_statsfile = ctx.outputs.statsfile,
         output_manifest = ctx.outputs.manifest,
+        main_class = ctx.attr.main_class,
     )
 
 def scala_repl_impl(ctx):
-    scalac_provider = _scalac_provider(ctx)
     return impl_helper(
         ctx,
         output_executable = ctx.outputs.executable,
@@ -89,10 +79,9 @@ def scala_repl_impl(ctx):
         output_deploy_jar = ctx.outputs.deploy_jar,
         output_statsfile = ctx.outputs.statsfile,
         output_manifest = ctx.outputs.manifest,
-        extra_deps = [d[JavaInfo] for d in scalac_provider.default_repl_classpath],
         extra_jvm_flags = ["-Dscala.usejavacp=true"],
         extra_args = ctx.attr.scalacopts or [],
-        override_main_class = "scala.tools.nsc.MainGenericRunner",
+        main_class = "scala.tools.nsc.MainGenericRunner",
         executable_wrapper_preamble = """
 # save stty like in bin/scala
 saved_stty=$(stty -g 2>/dev/null)
@@ -129,8 +118,7 @@ def scala_test_impl(ctx):
         output_deploy_jar = ctx.outputs.deploy_jar,
         output_statsfile = ctx.outputs.statsfile,
         output_manifest = ctx.outputs.manifest,
-        deps_enforcer_ignored_jars = ctx.attr._scalatest[JavaInfo].transitive_compile_time_jars,
-        extra_deps = [ctx.attr._scalatest[JavaInfo]],
+        main_class = ctx.attr.main_class,
         extra_runtime_deps = [
             ctx.attr._scalatest_reporter[JavaInfo],
             ctx.attr._scalatest_runner[JavaInfo],
@@ -155,12 +143,6 @@ def scala_junit_test_impl(ctx):
     else:
         test_archives += [ctx.outputs.jar]
 
-    extra_deps = [
-        ctx.attr._junit[JavaInfo],
-        ctx.attr._hamcrest[JavaInfo],
-        ctx.attr._bazel_test_runner[JavaInfo],
-        ctx.attr.suite_label[JavaInfo],
-    ]
     return impl_helper(
         ctx,
         output_executable = ctx.outputs.executable,
@@ -168,9 +150,11 @@ def scala_junit_test_impl(ctx):
         output_deploy_jar = ctx.outputs.deploy_jar,
         output_statsfile = ctx.outputs.statsfile,
         output_manifest = ctx.outputs.manifest,
-        override_main_class = "com.google.testing.junit.runner.BazelTestRunner",
-        deps_enforcer_ignored_jars = depset(transitive = [j.compile_jars for j in extra_deps]),
-        extra_deps = extra_deps,
+        main_class = "com.google.testing.junit.runner.BazelTestRunner",
+        extra_runtime_deps = [
+            ctx.attr._bazel_test_runner[JavaInfo],
+            ctx.attr.suite_label[JavaInfo],
+        ],
         extra_jvm_flags = [
             "-ea",
             "-Dbazel.test_suite=%s" % ctx.attr.suite_class,

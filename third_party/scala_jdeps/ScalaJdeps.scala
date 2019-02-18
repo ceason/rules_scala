@@ -80,12 +80,18 @@ object ScalaJdeps {
     if (c.unusedDeps == EnforcementMode.Off) {
       return
     }
+    val usedLabels = usedJars
+      .map(getTargetFromJar)
+      .map(resolveExportedLabel)
+
     c.directJars
       .filterNot(usedJars.contains)
       .filterNot(c.ignoredJars.contains)
       .filter(jarHasClassfiles)
       .map(getTargetFromJar)
+      .map(resolveExportedLabel)
       .filterNot(c.ignoredLabels.contains)
+      .filterNot(usedLabels.contains)
       .map { target =>
         s"""Target '$target' is specified as a dependency to ${c.currentTarget} but isn't used, please remove it from the deps.
            |You can use the following buildozer command:
@@ -94,7 +100,7 @@ object ScalaJdeps {
       }.foreach { errMsg =>
       c.unusedDeps match {
         case EnforcementMode.Error => g.reporter.error(g.NoPosition, errMsg)
-        case EnforcementMode.Warn => g.reporter.info(g.NoPosition, errMsg, force = true)
+        case EnforcementMode.Warn => g.reporter.warning(g.NoPosition, errMsg)
         case _ =>
       }
     }
@@ -121,6 +127,11 @@ object ScalaJdeps {
         case _ =>
       }
     }
+  }
+
+  // Resolve exported labels to their directly referenced dependencies
+  protected[scala_jdeps] def resolveExportedLabel(label: String)(implicit c: Config): String = {
+    c.depsExportedLabels.getOrElse(label, label)
   }
 
   // We want to ignore jars that don't actually have any classfiles in them

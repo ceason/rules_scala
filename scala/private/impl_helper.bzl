@@ -2,36 +2,10 @@ load(":compile.bzl", "compile", "scalac")
 load(":pack_jar.bzl", "pack_jar")
 load(":launcher.bzl", "launcher")
 
-# convert JavaInfo to a backward compatible 'scala' legacy provider
-def _scala_provider_from(java_info, output_jar):
-    return struct(
-        annotation_processing = java_info.annotation_processing,
-        compilation_info = java_info.compilation_info,
-        compile_jars = java_info.compile_jars,
-        full_compile_jars = java_info.full_compile_jars,
-        runtime_output_jars = java_info.runtime_output_jars,
-        source_jars = java_info.source_jars,
-        transitive_compile_time_jars = java_info.transitive_compile_time_jars,
-        transitive_deps = java_info.transitive_deps,
-        transitive_exports = java_info.transitive_exports,
-        transitive_runtime_deps = java_info.transitive_runtime_deps,
-        transitive_runtime_jars = java_info.transitive_runtime_jars,
-        transitive_source_jars = java_info.transitive_source_jars,
-        outputs = struct(
-            jars = java_info.outputs.jars,
-            jdeps = java_info.outputs.jdeps,
-            native_headers = java_info.outputs.native_headers,
-            class_jar = output_jar,
-        ),
-    )
-
 # Does the common recipe, using ctx.attrs directly.
 # Returns struct with legacy providers & new provider format.
 def impl_helper(
         ctx,
-
-        # depset[File]
-        deps_enforcer_ignored_jars = None,
 
         # list[JavaInfo]
         extra_exports = [],
@@ -54,18 +28,13 @@ def impl_helper(
 
         # String
         executable_wrapper_preamble = None,
-        override_main_class = None,
-        override_strict_deps = None,
-        override_unused_deps = None,
+        main_class = None,
+        strict_deps_mode = None,
+        unused_deps_mode = None,
 
         # bool
         use_ijar = False):
     tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
-    unused_deps = override_unused_deps or getattr(ctx.attr, "unused_dependency_checker_mode", None)
-    main_class = override_main_class or getattr(ctx.attr, "main_class", None)
-    strict_deps = override_strict_deps or ctx.fragments.java.strict_java_deps
-    if strict_deps == "default":
-        strict_deps = None
 
     source_files = []
     source_jars = []
@@ -76,7 +45,7 @@ def impl_helper(
             source_jars += [f]
         else:
             fail("Invalid file type, wanted '.java .scala .srcjar' but got '%s'" % f.basename)
-    deps = [tc.runtime] + extra_deps + [d[JavaInfo] for d in getattr(ctx.attr, "deps", [])]
+    deps = [d[JavaInfo] for d in getattr(ctx.attr, "deps", [])] + extra_deps
     exports = [d[JavaInfo] for d in getattr(ctx.attr, "exports", [])] + extra_exports
     runtime_deps = [d[JavaInfo] for d in getattr(ctx.attr, "runtime_deps", [])] + extra_runtime_deps
     resource_jars = getattr(ctx.files, "resource_jars", [])
@@ -98,16 +67,8 @@ def impl_helper(
             neverlink = getattr(ctx.attr, "neverlink", False),
             scalac_opts = getattr(ctx.attr, "scalacopts", []),
             plugins = [d[JavaInfo] for d in getattr(ctx.attr, "plugins", [])],
-            unused_deps_mode = unused_deps,
-            strict_deps_mode = strict_deps,
-            deps_enforcer_ignored_jars = depset(
-                transitive = (
-                    [deps_enforcer_ignored_jars] if deps_enforcer_ignored_jars else []
-                ) + [
-                    d[JavaInfo].compile_jars
-                    for d in getattr(ctx.attr, "unused_dependency_checker_ignored_targets", [])
-                ],
-            ),
+            unused_deps_mode = unused_deps_mode,
+            strict_deps_mode = strict_deps_mode,
             resource_jars = getattr(ctx.files, "resource_jars", []),
             resource_strip_prefix = getattr(ctx.attr, "resource_strip_prefix", ""),
             resources = getattr(ctx.files, "resources", []),
@@ -194,7 +155,8 @@ def impl_helper(
     )
     return struct(
         java = java_info,
-        scala = _scala_provider_from(java_info, output_jar),
+#        scala = _scala_provider_from(java_info, output_jar),
+        scala = java_info,
         providers = [
             java_info,
             default_info,

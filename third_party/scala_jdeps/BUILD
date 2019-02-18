@@ -22,7 +22,6 @@ scala_library_for_plugin_bootstrapping(
     visibility = ["//visibility:public"],
     deps = [
         ":java_deps_proto",
-        "@com_google_protobuf//:protobuf_java",
         "//external:io_bazel_rules_scala/dependency/scala/scala_compiler",
         "//external:io_bazel_rules_scala/dependency/scala/scala_reflect",
     ],

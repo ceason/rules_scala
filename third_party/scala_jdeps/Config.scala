@@ -13,8 +13,11 @@ class Config(args: List[String]) {
 
   import Config._
 
-  var directJars: mutable.Set[String] = mutable.HashSet()
-  var ignoredJars: mutable.Set[String] = mutable.HashSet()
+  // exportedLabel => labelInDeps
+  // TODO: use this info to properly enforce strict&unused deps
+  val depsExportedLabels: mutable.HashMap[String, String] = mutable.HashMap()
+  val directJars: mutable.Set[String] = mutable.HashSet()
+  val ignoredJars: mutable.Set[String] = mutable.HashSet()
   val classpathJars: mutable.Set[String] = mutable.HashSet()
   var output: String = _
   var strictDeps: EnforcementMode = EnforcementMode.Off
@@ -29,6 +32,10 @@ class Config(args: List[String]) {
       case "current-target" :: target :: _ => currentTarget = target
       case "strict-deps-mode" :: mode :: _ => strictDeps = EnforcementMode.parse(mode)
       case "unused-deps-mode" :: mode :: _ => unusedDeps = EnforcementMode.parse(mode)
+      case "deps-exported-labels" :: labels :: _ => labels.split("::").toList match {
+        case actual :: exportedFrom :: Nil => depsExportedLabels += (actual -> exportedFrom)
+        case _ => sys.error(s"Bad arg to deps-exported-labels '$labels'")
+      }
       case unknown :: _ => sys.error(s"unknown param $unknown")
       case Nil =>
     }
@@ -41,7 +48,7 @@ class Config(args: List[String]) {
   }
   var ignoredLabels: Set[String] = ignoredJars.toSet.flatMap { path: String =>
     Try(ScalaJdeps.getTargetFromJar(path)).toOption
-  }
+  } + currentTarget
 }
 
 object Config {

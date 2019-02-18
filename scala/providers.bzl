@@ -1,10 +1,3 @@
-ScalaInfo = provider(
-    fields = {
-        "java_info":"JavaInfo provider",
-        "statsfile":"Compilation stats file",
-    }
-)
-
 # TODO: this should really be a bazel provider, but we are using old-style rule outputs
 # we need to document better what the intellij dependencies on this code actually are
 def create_scala_provider(
@@ -16,7 +9,6 @@ def create_scala_provider(
         full_jars,
         source_jars,
         statsfile):
-
     formatted_for_intellij = [
         struct(class_jar = jar, ijar = None, source_jar = None, source_jars = source_jars)
         for jar in full_jars

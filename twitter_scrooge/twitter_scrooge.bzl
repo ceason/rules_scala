@@ -235,7 +235,7 @@ def _scrooge_aspect_impl(target, ctx):
 
     # we sort so the inputs are always the same for caching
     compile_thrifts = sorted(target_ti.srcs.to_list())
-    imps = [j[JavaInfo] for j in ctx.attr._implicit_compile_deps]
+    imps = [j[JavaInfo] for j in ctx.attr._scala_toolchain]
     if compile_thrifts:
         # we sort so the inputs are always the same for caching
         compile_thrift_map = {}
@@ -271,8 +271,8 @@ def _scrooge_aspect_impl(target, ctx):
             extra_exports = imps,
             output_jar = output,
             output_statsfile = statsfile,
-            override_strict_deps = "off",
-            override_unused_deps = "off",
+            strict_deps_mode = "off",
+            unused_deps_mode = "off",
         ).java
 
     else:
@@ -290,6 +290,16 @@ def _scrooge_aspect_impl(target, ctx):
         ),
     ]
 
+_implicit_compile_deps = attr.label_list(
+    providers = [[JavaInfo]],
+    default = [
+        "//src/java/io/bazel/rulesscala/scalac:current_classpath",
+        "//external:io_bazel_rules_scala/dependency/thrift/libthrift",
+        "//external:io_bazel_rules_scala/dependency/thrift/scrooge_core",
+        "//external:io_bazel_rules_scala/dependency/thrift/util_core",
+    ],
+)
+
 scrooge_aspect = aspect(
     implementation = _scrooge_aspect_impl,
     attr_aspects = ["deps"],
@@ -305,20 +315,7 @@ scrooge_aspect = aspect(
                 "@io_bazel_rules_scala//src/java/io/bazel/rulesscala/scalac",
             ),
         ),
-        "_implicit_compile_deps": attr.label_list(
-            providers = [JavaInfo],
-            default = [
-                Label(
-                    "//external:io_bazel_rules_scala/dependency/thrift/libthrift",
-                ),
-                Label(
-                    "//external:io_bazel_rules_scala/dependency/thrift/scrooge_core",
-                ),
-                Label(
-                    "//external:io_bazel_rules_scala/dependency/thrift/util_core",
-                ),
-            ],
-        ),
+        "_scala_toolchain": _implicit_compile_deps,
         "_singlejar": attr.label(
             executable = True,
             cfg = "host",
@@ -337,9 +334,6 @@ scrooge_aspect = aspect(
         "_host_javabase": attr.label(
             default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
             cfg = "host",
-        ),
-        "_java_runtime": attr.label(
-            default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
         ),
     },
     required_aspect_providers = [
@@ -371,21 +365,25 @@ scrooge_scala_library = rule(
     attrs = {
         "deps": attr.label_list(aspects = [scrooge_aspect]),
         "exports": attr.label_list(providers = [JavaInfo]),
+        "_scala_toolchain": _implicit_compile_deps,
     },
     provides = [DefaultInfo, ScroogeInfo, JavaInfo],
 )
 
 def _scrooge_scala_import_impl(ctx):
-    scala_jars = depset(ctx.files.scala_jars)
-    jars_ji = java_common.create_provider(
-        use_ijar = False,
-        compile_time_jars = scala_jars,
-        transitive_compile_time_jars = scala_jars,
-        transitive_runtime_jars = scala_jars,
-    )
-    java_info = java_common.merge(
-        [imp[JavaInfo] for imp in ctx.attr._implicit_compile_deps] + [jars_ji],
-    )
+    java_infos = []
+    for jar in ctx.files.scala_jars:
+        java_infos += [JavaInfo(
+            output_jar = jar,
+            compile_jar = java_common.stamp_jar(
+                ctx.actions,
+                jar = jar,
+                target_label = ctx.label,
+                java_toolchain = ctx.attr._java_toolchain,
+            ),
+            deps = [d[JavaInfo] for d in ctx.attr._scala_toolchain],
+        )]
+    java_info = java_common.merge(java_infos)
 
     # to make the thrift_info, we only put this in the
     # transitive part
@@ -401,19 +399,9 @@ scrooge_scala_import = rule(
     attrs = {
         "thrift_jars": attr.label_list(allow_files = [".jar"]),
         "scala_jars": attr.label_list(allow_files = [".jar"]),
-        "_implicit_compile_deps": attr.label_list(
-            providers = [JavaInfo],
-            default = [
-                Label(
-                    "//external:io_bazel_rules_scala/dependency/scala/scala_library",
-                ),
-                Label(
-                    "//external:io_bazel_rules_scala/dependency/thrift/libthrift",
-                ),
-                Label(
-                    "//external:io_bazel_rules_scala/dependency/thrift/scrooge_core",
-                ),
-            ],
+        "_scala_toolchain": _implicit_compile_deps,
+        "_java_toolchain": attr.label(
+            default = Label("@bazel_tools//tools/jdk:current_java_toolchain"),
         ),
     },
     provides = [ThriftInfo, JavaInfo, ScroogeImport],
