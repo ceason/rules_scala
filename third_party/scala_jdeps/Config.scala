@@ -20,9 +20,9 @@ class Config(args: List[String]) {
   val ignoredJars: mutable.Set[String] = mutable.HashSet()
   val classpathJars: mutable.Set[String] = mutable.HashSet()
   var output: String = _
+  var currentTarget: String = _
   var strictDeps: EnforcementMode = EnforcementMode.Off
   var unusedDeps: EnforcementMode = EnforcementMode.Off
-  var currentTarget: String = _
   for (option <- args) {
     option.split(":", 2).toList match {
       case "direct-jars" :: paths :: _ => directJars ++= paths.split(File.pathSeparator)

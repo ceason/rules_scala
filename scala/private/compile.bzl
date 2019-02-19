@@ -1,29 +1,6 @@
 load(":pack_jar.bzl", "pack_jar")
-load(":exported_labels_aspect.bzl", "ExportedLabels", "get_exported_labels")
+load(":jdeps_enforcer.bzl", "DepsEnforcerInfo", "add_scalac_plugin_args")
 
-def _default_unused_deps(ctx):
-    # "--define unused_scala_deps=..." flag takes precedence
-    if "unused_scala_deps" in ctx.var:
-        return ctx.var.unused_scala_deps
-
-    # otherwise use rule-configured setting (if present)
-    if getattr(ctx.attr, "unused_dependency_checker_mode", None):
-        return ctx.attr.unused_dependency_checker_mode
-
-    # fall back to toolchain default
-    tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
-    return tc.unused_dependency_checker_mode
-
-def _default_strict_deps(ctx):
-    # "--define strict_scala_deps=..." flag takes precedence
-    if "strict_scala_deps" in ctx.var:
-        return ctx.var.strict_scala_deps
-
-    # fall back to strict java deps setting
-    if (ctx.fragments.java.strict_java_deps and
-        ctx.fragments.java.strict_java_deps != "default"):
-        return ctx.fragments.java.strict_java_deps
-    return "off"
 
 # Gets compile jars from this provider including those from its exported targets
 # Returns list[File], beginning with the direct jars
@@ -132,18 +109,13 @@ def scalac(
             join_with = ctx.configuration.host_path_separator,
             format_joined = "-Xplugin:%s",
         )
-        ignored_jars = depset(transitive = [
-            d[JavaInfo].compile_jars
-            for d in getattr(ctx.attr, "unused_dependency_checker_ignored_targets", [])
-        ] + [
-            d[JavaInfo].transitive_compile_time_jars
-            for d in ctx.attr._scala_toolchain
-        ])
-        args.add_joined(
-            "--scalac_opts",
-            ignored_jars,
-            join_with = ctx.configuration.host_path_separator,
-            format_joined = "-P:scala-jdeps:ignored-jars:%s",
+        add_scalac_plugin_args(
+            ctx,
+            args,
+            strict_deps_mode = strict_deps_mode,
+            unused_deps_mode = unused_deps_mode,
+            direct_jars = depset(transitive = [d.compile_jars for d in deps]),
+            classpath_jars = classpath_jars,
         )
         args.add_joined(
             "--scalac_opts",
@@ -151,35 +123,8 @@ def scalac(
             join_with = ctx.configuration.host_path_separator,
             format_joined = "-P:scala-jdeps:classpath-jars:%s",
         )
-        direct_jars = depset(transitive = [d.compile_jars for d in deps])
-        args.add_joined(
-            "--scalac_opts",
-            direct_jars,
-            join_with = ctx.configuration.host_path_separator,
-            format_joined = "-P:scala-jdeps:direct-jars:%s",
-        )
-
-        # Make a mapping between labels in 'deps' and labels which those deps export.
-        #  The dep enforcer needs this info.
-        for actual, exported_from in get_exported_labels(ctx.attr, ctx.label).items():
-            args.add_joined(
-                "--scalac_opts",
-                [actual, exported_from],
-                join_with = "::",  # ':' is reserved & therefore won't collide
-                format_joined = "-P:scala-jdeps:deps-exported-labels:%s",
-            )
         args.add("--scalac_opts", output_jdeps, format = "-P:scala-jdeps:output:%s")
         args.add("--scalac_opts", str(ctx.label), format = "-P:scala-jdeps:current-target:%s")
-        args.add(
-            "--scalac_opts",
-            strict_deps_mode or _default_strict_deps(ctx),
-            format = "-P:scala-jdeps:strict-deps-mode:%s",
-        )
-        args.add(
-            "--scalac_opts",
-            unused_deps_mode or _default_unused_deps(ctx),
-            format = "-P:scala-jdeps:unused-deps-mode:%s",
-        )
 
     # compilation outputs
     args.add("--scalac_opts", "-d")
