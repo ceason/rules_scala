@@ -1,5 +1,7 @@
 package io.bazel.rulesscala.scalac;
 
+import com.google.devtools.build.lib.view.proto.Deps.Dependencies;
+import io.bazel.rulesscala.scalac.JdepsEnforcer.EnforcementMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -10,16 +12,14 @@ import java.util.List;
  */
 public class JdepsJarMerger extends Options {
 
-  List<String> jdeps = new ArrayList<>();
-  List<String> jars = new ArrayList<>();
+  List<String> inputJdeps = new ArrayList<>();
+  List<String> inputJars = new ArrayList<>();
   String outputJar;
   String outputJdeps;
-  JdepsEnforcer enforcer;
+  List<String> enforcerArgs = new ArrayList<>();
 
   JdepsJarMerger(List<String> args) {
-
     super(args);
-    List<String> enforcerArgs = new ArrayList<>();
     while (hasMoreFlags()) {
       String flag = nextFlag();
       switch (flag) {
@@ -30,10 +30,10 @@ public class JdepsJarMerger extends Options {
           outputJdeps = getValue();
           break;
         case "--input_jar":
-          jars.add(getValue());
+          inputJars.add(getValue());
           break;
         case "--input_jdeps":
-          jdeps.add(getValue());
+          inputJdeps.add(getValue());
           break;
         default:
           // pass other args through to deps enforcer
@@ -41,11 +41,37 @@ public class JdepsJarMerger extends Options {
           enforcerArgs.add(getValue());
       }
     }
-    enforcer = new JdepsEnforcer(enforcerArgs);
+  }
+
+  // merge jars to output jar
+  void writeOutputJar() {
+    throw new RuntimeException("Unimplemented.");
+  }
+
+  // merge jars to output jar
+  Dependencies writeOutputJdeps() {
+    throw new RuntimeException("Unimplemented.");
   }
 
   public static void main(String[] args) {
     JdepsJarMerger jm = new JdepsJarMerger(Arrays.asList(args));
-
+    Dependencies jdeps = jm.writeOutputJdeps();
+    JdepsEnforcer enforcer = new JdepsEnforcer(jdeps, jm.enforcerArgs);
+    for (String msg : enforcer.getViolatingStrictDeps()) {
+      System.err.println(msg);
+      if (enforcer.strictDeps == EnforcementMode.ERROR) {
+        System.exit(1);
+      }
+    }
+    if (enforcer.unusedDeps != EnforcementMode.OFF) {
+      for (String msg : enforcer.getViolatingUnusedDeps()) {
+        System.err.println(msg);
+        if (enforcer.unusedDeps == EnforcementMode.ERROR) {
+          System.exit(1);
+        }
+      }
+      ;
+    }
+    jm.writeOutputJar();
   }
 }
