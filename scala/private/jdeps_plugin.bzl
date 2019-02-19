@@ -1,4 +1,15 @@
-DepsEnforcerInfo = provider(
+jdeps_plugin_attrs = {
+    "_scalac_jdeps_plugin": attr.label(
+        default = Label("//src/java/io/bazel/rulesscala/scalac:jdeps_plugin"),
+        providers = [[JavaInfo]],
+    ),
+    "_jdeps_jar_merger": attr.label(
+        default = Label("//src/java/io/bazel/rulesscala/scalac:jdeps_jar_merger"),
+        providers = [[JavaInfo]],
+    ),
+}
+
+_EnforcerAspectInfo = provider(
     fields = {
         "labels": 'Map of origin/jar Label => "exported as Label"',
         "unused_deps_ignored_jars": "depset[File] of transitive jars (eg from toolchains)",
@@ -18,17 +29,17 @@ def _collect_deps_enforcer_info(ctx, rule_attr = None):
         unused_deps_ignored_jars += [t[JavaInfo].transitive_compile_time_jars]
 
     for t in getattr(rule_attr, "deps", []):
-        if DepsEnforcerInfo in t:
-            labels.update(t[DepsEnforcerInfo].labels)
-            unused_deps_ignored_jars += [t[DepsEnforcerInfo].unused_deps_ignored_jars]
+        if _EnforcerAspectInfo in t:
+            labels.update(t[_EnforcerAspectInfo].labels)
+            unused_deps_ignored_jars += [t[_EnforcerAspectInfo].unused_deps_ignored_jars]
 
     my_label = str(ctx.label)
     for t in getattr(rule_attr, "exports", []):
         direct_labels[str(t.label)] = my_label
-        if DepsEnforcerInfo in t:
-            labels.update(t[DepsEnforcerInfo].labels)
-            unused_deps_ignored_jars += [t[DepsEnforcerInfo].unused_deps_ignored_jars]
-            direct_jars_from_exports += [t[DepsEnforcerInfo].direct_jars_from_exports]
+        if _EnforcerAspectInfo in t:
+            labels.update(t[_EnforcerAspectInfo].labels)
+            unused_deps_ignored_jars += [t[_EnforcerAspectInfo].unused_deps_ignored_jars]
+            direct_jars_from_exports += [t[_EnforcerAspectInfo].direct_jars_from_exports]
         if JavaInfo in t:
             direct_jars_from_exports += [t[JavaInfo].compile_jars]
 
@@ -38,7 +49,7 @@ def _collect_deps_enforcer_info(ctx, rule_attr = None):
             labels[k] = my_label
     labels.update(direct_labels)
 
-    return DepsEnforcerInfo(
+    return _EnforcerAspectInfo(
         labels = labels,
         unused_deps_ignored_jars = depset(transitive = unused_deps_ignored_jars),
         direct_jars_from_exports = depset(transitive = direct_jars_from_exports),
@@ -58,7 +69,7 @@ def _get_deps_enforcer_cfg(
         d[JavaInfo].compile_jars
         for d in getattr(ctx.attr, "unused_dependency_checker_ignored_targets", [])
     ] + [info.unused_deps_ignored_jars])
-    effective_direct_jars = depset(transitive = direct_jars + [info.direct_jars_from_exports])
+    effective_direct_jars = depset(transitive = [direct_jars, info.direct_jars_from_exports])
     return struct(
         direct_jars = effective_direct_jars,
         unused_deps_ignored_jars = unused_deps_ignored_jars,
@@ -71,7 +82,7 @@ def _impl(target, ctx):
     info = _collect_deps_enforcer_info(ctx, rule_attr = ctx.rule.attr)
     return [info]
 
-deps_enforcer_aspect = aspect(
+jdeps_enforcer_aspect = aspect(
     _impl,
     attr_aspects = ["deps", "exports"],
 )
@@ -100,13 +111,59 @@ def _default_strict_deps(ctx):
         return ctx.fragments.java.strict_java_deps
     return "off"
 
-def add_enforcer_args_jdepsmerger(ctx, args, **kwargs):
-    pass
+def has_jdeps_plugin(ctx):
+    return hasattr(ctx.attr, "_scalac_jdeps_plugin")
 
-def add_enforcer_args_scalacplugin(ctx, args, **kwargs):
+def merge_jdeps_jars(
+        ctx,
+        # File
+        output = None,
+        output_jdeps = None,
+
+        # list[File]
+        jars = [],
+        jdeps = [],
+
+        # passed through to enforcer config
+        **kwargs):
+    args = ctx.actions.args()
+
+    fail("Unimplemented.")
+
+# Returns depset[File] that needs to go into compilation action input
+def add_scalac_jdeps_plugin_args(
+        ctx,
+        args,
+        # depset[File]
+        classpath_jars = None,
+
+        # File
+        output_jdeps = None,
+
+        # passed through to enforcer config
+        **kwargs):
+    if not output_jdeps:
+        fail("Must provide a File for output_jdeps")
+    jdeps_jars = ctx.attr._scalac_jdeps_plugin[JavaInfo].transitive_runtime_jars
     cfg = _get_deps_enforcer_cfg(ctx, **kwargs)
-    args.add("--scalac_opts", strict_deps_mode, format = "-P:scala-jdeps:dep_enforcer:strict_deps_mode:%s")
-    args.add("--scalac_opts", unused_deps_mode, format = "-P:scala-jdeps:dep_enforcer:unused_deps_mode:%s")
+
+    args.add("--scalac_opts", "-Xplugin-require:scala-jdeps")
+    args.add_joined(
+        "--scalac_opts",
+        jdeps_jars,
+        join_with = ctx.configuration.host_path_separator,
+        format_joined = "-Xplugin:%s",
+    )
+    args.add("--scalac_opts", cfg.strict_deps_mode, format = "-P:scala-jdeps:dep_enforcer:strict_deps_mode:%s")
+    args.add("--scalac_opts", cfg.unused_deps_mode, format = "-P:scala-jdeps:dep_enforcer:unused_deps_mode:%s")
+    args.add("--scalac_opts", output_jdeps, format = "-P:scala-jdeps:output:%s")
+    args.add("--scalac_opts", str(ctx.label), format = "-P:scala-jdeps:current-target:%s")
+    args.add_joined(
+        "--scalac_opts",
+        classpath_jars,
+        join_with = ctx.configuration.host_path_separator,
+        format_joined = "-P:scala-jdeps:classpath-jars:%s",
+    )
     args.add_joined(
         "--scalac_opts",
         cfg.unused_deps_ignored_jars,
@@ -122,10 +179,12 @@ def add_enforcer_args_scalacplugin(ctx, args, **kwargs):
 
     # Make a mapping between labels in 'deps' and labels which those deps export.
     #  The dep enforcer needs this info.
-    for actual, exported_from in info.labels.items():
+    for actual, exported_from in cfg.labels.items():
         args.add_joined(
             "--scalac_opts",
             [actual, exported_from],
             join_with = "::",  # ':' is reserved & therefore won't collide
             format_joined = "-P:scala-jdeps:dep_enforcer:deps_exported_labels:%s",
         )
+
+    return jdeps_jars

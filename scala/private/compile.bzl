@@ -1,5 +1,5 @@
 load(":pack_jar.bzl", "pack_jar")
-load(":jdeps_enforcer.bzl", "DepsEnforcerInfo", "add_scalac_plugin_args")
+load(":jdeps_plugin.bzl", "add_scalac_jdeps_plugin_args", "merge_jdeps_jars", "has_jdeps_plugin")
 
 
 # Gets compile jars from this provider including those from its exported targets
@@ -36,10 +36,6 @@ def scalac(
         strict_deps_mode = None,
         unused_deps_mode = None):
     tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
-
-    # input validation
-    if output_jdeps and not hasattr(ctx.attr, "_scalac_jdeps_plugin"):
-        fail("output_jdeps requires the implicit attr _scalac_jdeps_plugin")
 
     # get implicit compile/runtime jars for the rule
     implicit_deps = [d[JavaInfo] for d in ctx.attr._scala_toolchain]
@@ -99,32 +95,17 @@ def scalac(
 
     # optionally add jdeps plugin & opts
     if output_jdeps:
-        jdeps_jars = ctx.attr._scalac_jdeps_plugin[JavaInfo].transitive_runtime_jars
-        compile_inputs += [jdeps_jars]
-        compile_outputs += [output_jdeps]
-        args.add("--scalac_opts", "-Xplugin-require:scala-jdeps")
-        args.add_joined(
-            "--scalac_opts",
-            jdeps_jars,
-            join_with = ctx.configuration.host_path_separator,
-            format_joined = "-Xplugin:%s",
-        )
-        add_scalac_plugin_args(
+        jdeps_jars = add_scalac_jdeps_plugin_args(
             ctx,
             args,
             strict_deps_mode = strict_deps_mode,
             unused_deps_mode = unused_deps_mode,
+            output_jdeps = output_jdeps,
             direct_jars = depset(transitive = [d.compile_jars for d in deps]),
             classpath_jars = classpath_jars,
         )
-        args.add_joined(
-            "--scalac_opts",
-            classpath_jars,
-            join_with = ctx.configuration.host_path_separator,
-            format_joined = "-P:scala-jdeps:classpath-jars:%s",
-        )
-        args.add("--scalac_opts", output_jdeps, format = "-P:scala-jdeps:output:%s")
-        args.add("--scalac_opts", str(ctx.label), format = "-P:scala-jdeps:current-target:%s")
+        compile_inputs += [jdeps_jars]
+        compile_outputs += [output_jdeps]
 
     # compilation outputs
     args.add("--scalac_opts", "-d")
@@ -196,15 +177,23 @@ def compile(
 
         # kwargs are passed to 'scalac()'
         **kwargs):
-    output_jdeps = None
     if "output_jdeps" in kwargs:
         fail("Cannot set reserved kwarg 'output_jdeps' in compile()")
-    if hasattr(ctx.attr, "_scalac_jdeps_plugin"):
-        output_jdeps = ctx.actions.declare_file("%s.jdeps" % output.basename[:-len(".jar")], sibling = output)
+    # Files which will (maybe) be produced by actions
+    output_jdeps = None
+    scalac_output = ctx.actions.declare_file("%s-class.jar" % output.basename[:-len(".jar")], sibling = output)
+    scalac_jdeps = None
+    javac_output = None
+    javac_jdeps = None
+
+    # info we'll use to determine which files will be generated
     java_files = [f for f in source_files if f.extension == "java"]
+    will_compile_java = (java_files or source_jars) and getattr(ctx.attr, "expect_java_output", True)
+
+    if has_jdeps_plugin(ctx):
+        output_jdeps = ctx.actions.declare_file("%s.jdeps" % output.basename[:-len(".jar")], sibling = output)
 
     # compile scala
-    scalac_output = ctx.actions.declare_file("%s-class.jar" % output.basename[:-len(".jar")], sibling = output)
     scalac(
         ctx,
         source_jars = source_jars,
@@ -213,16 +202,16 @@ def compile(
         output_statsfile = output_statsfile,
         output_jdeps = output_jdeps,
         deps = deps,
-        unused_deps_mode = "off" if java_files else unused_deps_mode,
+        unused_deps_mode = "off" if will_compile_java else unused_deps_mode,
         **kwargs
     )
 
     implicit_deps = [d[JavaInfo] for d in ctx.attr._scala_toolchain]
     # maybe compile java, unless it's been explicitly turned off
 
-    if (java_files or source_jars) and getattr(ctx.attr, "expect_java_output", True):
+    if will_compile_java:
         javac_output = ctx.actions.declare_file("%s-java-class.jar" % output.basename[:-len(".jar")], sibling = output)
-        java_common.compile(
+        javac_jdeps = java_common.compile(
             ctx,
             source_jars = source_jars,
             source_files = java_files,
@@ -238,8 +227,8 @@ def compile(
                    [JavaInfo(compile_jar = scalac_output, output_jar = scalac_output)],
             java_toolchain = ctx.attr._java_toolchain,
             host_javabase = ctx.attr._host_javabase,
-            strict_deps = ctx.fragments.java.strict_java_deps,
-        )
+            strict_deps = "OFF",
+        ).outputs.jdeps
 
         # combine the java and scala compiled jars
         full_compile_jar = ctx.actions.declare_file("%s-merged-class.jar" % output.basename[:-len(".jar")], sibling = output)

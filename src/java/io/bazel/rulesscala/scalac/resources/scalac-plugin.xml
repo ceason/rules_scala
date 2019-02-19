@@ -1,0 +1,4 @@
+<plugin>
+    <name>scala-jdeps</name>
+    <classname>io.bazel.rulesscala.scalac.JdepsPlugin</classname>
+</plugin>

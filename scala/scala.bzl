@@ -9,8 +9,9 @@ load(
     _scala_test_impl = "scala_test_impl",
 )
 load(
-    "@io_bazel_rules_scala//scala/private:exported_labels_aspect.bzl",
-    _exported_labels_aspect = "exported_labels_aspect",
+    "@io_bazel_rules_scala//scala/private:jdeps_plugin.bzl",
+    _jdeps_enforcer_aspect = "jdeps_enforcer_aspect",
+    _jdeps_plugin_attrs = "jdeps_plugin_attrs",
 )
 load(
     "@bazel_tools//tools/build_defs/repo:http.bzl",
@@ -73,13 +74,12 @@ def _scala_toolchain_attr(extra_deps):
     return attr.label_list(
         providers = [[JavaInfo]],
         default = [Label(l) for l in extra_deps],
-        aspects = [_exported_labels_aspect],
     )
 
 # Common attributes reused across multiple rules.
 _common_attrs_for_plugin_bootstrapping = {
     "srcs": attr.label_list(allow_files = [".scala", ".srcjar", ".java"]),
-    "deps": attr.label_list(aspects = [_exported_labels_aspect]),
+    "deps": attr.label_list(aspects = [_jdeps_enforcer_aspect]),
     "plugins": attr.label_list(allow_files = [".jar"]),
     "runtime_deps": attr.label_list(providers = [[JavaInfo]]),
     "data": attr.label_list(allow_files = True),
@@ -99,6 +99,7 @@ _common_attrs_for_plugin_bootstrapping = {
 }
 
 _common_attrs = {}
+_common_attrs.update(_jdeps_plugin_attrs)
 _common_attrs.update(_common_attrs_for_plugin_bootstrapping)
 _common_attrs.update({
     "unused_dependency_checker_mode": attr.string(
@@ -106,15 +107,11 @@ _common_attrs.update({
         mandatory = False,
     ),
     "unused_dependency_checker_ignored_targets": attr.label_list(default = []),
-    "_scalac_jdeps_plugin": attr.label(
-        default = Label("//third_party/scala_jdeps:scala_jdeps"),
-        providers = [[JavaInfo]],
-    ),
 })
 
 _library_attrs = {
     "main_class": attr.string(),
-    "exports": attr.label_list(allow_files = False, aspects = [_exported_labels_aspect]),
+    "exports": attr.label_list(allow_files = False, aspects = [_jdeps_enforcer_aspect]),
 }
 
 _common_outputs = {
@@ -159,7 +156,7 @@ scala_library_for_plugin_bootstrapping = rule(
 
 _scala_macro_library_attrs = {
     "main_class": attr.string(),
-    "exports": attr.label_list(allow_files = False, aspects = [_exported_labels_aspect]),
+    "exports": attr.label_list(allow_files = False, aspects = [_jdeps_enforcer_aspect]),
 }
 _scala_macro_library_attrs.update(_implicit_deps)
 _scala_macro_library_attrs.update(_common_attrs)

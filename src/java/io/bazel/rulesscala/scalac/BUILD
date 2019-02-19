@@ -1,3 +1,4 @@
+load("//scala:scala.bzl", "scala_library_for_plugin_bootstrapping")
 load(
     ":jvm_export_toolchain.bzl",
     _export_scalac_repositories_from_toolchain_to_jvm = "export_scalac_repositories_from_toolchain_to_jvm",
@@ -19,6 +20,38 @@ _export_scalac_repositories_from_toolchain_to_jvm(
     name = "current_repl_classpath",
     exported_attr = "default_repl_classpath",
     visibility = ["//visibility:public"],
+)
+
+java_library(
+    name = "options",
+    srcs = ["Options.java"],
+)
+
+java_library(
+    name = "jdeps_enforcer",
+    srcs = ["JdepsEnforcer.java"],
+    deps = [":options"],
+)
+
+java_library(
+    name = "jdeps_jar_merger",
+    srcs = ["JdepsJarMerger.java"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":jdeps_enforcer",
+        ":options",
+    ],
+)
+
+scala_library_for_plugin_bootstrapping(
+    name = "jdeps_plugin",
+    srcs = ["JdepsPlugin.scala"],
+    resources = ["resources/scalac-plugin.xml"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/java/com/google/devtools/build/lib/view/proto:deps",
+        ":current_repl_classpath"
+    ],
 )
 
 java_binary(
