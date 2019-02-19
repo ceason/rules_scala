@@ -35,10 +35,10 @@ public class JdepsEnforcer extends Options {
     super(args);
     while (hasMoreFlags()) {
       switch (nextFlag()) {
-        case "--strict_deps":
+        case "--strict_deps_mode":
           strictDeps = EnforcementMode.valueOf(getValue().toUpperCase());
           break;
-        case "--unused_deps":
+        case "--unused_deps_mode":
           unusedDeps = EnforcementMode.valueOf(getValue().toUpperCase());
           break;
         case "--unused_deps_ignored_jars":
@@ -67,6 +67,7 @@ public class JdepsEnforcer extends Options {
         .collect(Collectors.toSet());
     usedLabels = usedJars.stream()
         .map(this::getLabelFromJar)
+        .map(this::resolveExportedLabel)
         .collect(Collectors.toSet());
     directLabels = directJars.stream()
         .map(this::getLabelFromJar)
@@ -82,11 +83,15 @@ public class JdepsEnforcer extends Options {
         .map(this::resolveExportedLabel)
         .filter(not(usedLabels::contains))
         .map(target -> (
-            "Target '{target}' is specified as a dependency to {currentTarget} but isn't used, please remove it from the deps.\n"
-                + "You can use the following buildozer command:\n"
-                + "buildozer 'remove deps {target}' {currentTarget}")
-            .replace("{target}", target)
-            .replace("{currentTarget}", currentTarget)
+                "Target '{target}' is specified as a dependency to {currentTarget} but isn't used, please remove it from the deps.\n"
+                    + "You can use the following buildozer command:\n"
+                    + "buildozer 'remove deps {target}' {currentTarget}"
+//                + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
+//                + "\nUSED_LABELS:\n  " + usedLabels.stream().sorted().collect(Collectors.joining("\n  "))
+//                + "\nIGNORED_JARS:\n  " + unusedDepsIgnoredJars.stream().sorted().collect(Collectors.joining("\n  "))
+            )
+                .replace("{target}", target)
+                .replace("{currentTarget}", currentTarget)
         )
         .collect(Collectors.toList());
   }

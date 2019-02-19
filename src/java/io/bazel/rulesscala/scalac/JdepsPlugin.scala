@@ -46,18 +46,20 @@ class JdepsPlugin(val global: Global) extends Plugin {
         // enforce strict/unused deps as appropriate
         val enforcer = new JdepsEnforcer(jdeps, cfg.enforcerArgs.asJava)
         if (enforcer.strictDeps != EnforcementMode.OFF) {
-          for (msg <- enforcer.getViolatingStrictDeps) {
+          for (msg <- enforcer.getViolatingStrictDeps.asScala) {
             enforcer.strictDeps match {
               case EnforcementMode.ERROR => reporter.error(NoPosition, msg)
               case EnforcementMode.WARN => reporter.warning(NoPosition, msg)
+              case EnforcementMode.OFF =>
             }
           }
         }
         if (enforcer.unusedDeps != EnforcementMode.OFF) {
-          for (msg <- enforcer.getViolatingUnusedDeps) {
+          for (msg <- enforcer.getViolatingUnusedDeps.asScala) {
             enforcer.unusedDeps match {
               case EnforcementMode.ERROR => reporter.error(NoPosition, msg)
               case EnforcementMode.WARN => reporter.warning(NoPosition, msg)
+              case EnforcementMode.OFF =>
             }
           }
         }
@@ -120,6 +122,9 @@ object JdepsPlugin {
   def findUsedJars(implicit global: Global): Set[String] = {
     import global._
     val jars = collection.mutable.Set[String]()
+    // TODO: distinguish between direct & indirect jars
+    val indirectJars = collection.mutable.Set[String]()
+
 
     def walkTopLevels(root: Symbol): Unit = {
       def safeInfo(sym: Symbol): Type =

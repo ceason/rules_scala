@@ -15,7 +15,7 @@ public class Options {
   private Queue<String> args;
 
 
-  Options(List<String> args) {
+  protected Options(List<String> args) {
     this.args = new LinkedList<>(args);
   }
 

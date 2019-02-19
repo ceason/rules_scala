@@ -21,7 +21,7 @@ scala_library(
         ":java_type",
         ":scala_type",
     ],
-    deps = [
+    runtime_deps = [
         ":java_type",
         ":scala_type",
     ],

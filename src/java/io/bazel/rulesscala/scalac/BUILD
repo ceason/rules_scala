@@ -30,7 +30,10 @@ java_library(
 java_library(
     name = "jdeps_enforcer",
     srcs = ["JdepsEnforcer.java"],
-    deps = [":options"],
+    deps = [
+        ":options",
+        "//src/java/com/google/devtools/build/lib/view/proto:deps",
+    ],
 )
 
 java_library(
@@ -49,8 +52,9 @@ scala_library_for_plugin_bootstrapping(
     resources = ["resources/scalac-plugin.xml"],
     visibility = ["//visibility:public"],
     deps = [
+        ":current_repl_classpath",
+        ":jdeps_enforcer",
         "//src/java/com/google/devtools/build/lib/view/proto:deps",
-        ":current_repl_classpath"
     ],
 )
 
@@ -67,6 +71,7 @@ java_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":current_repl_classpath",
+        ":options",
         "@io_bazel_rules_scala//src/java/com/google/devtools/build/lib:worker",
         "@io_bazel_rules_scala//src/java/io/bazel/rulesscala/worker",
     ],

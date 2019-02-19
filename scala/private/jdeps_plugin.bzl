@@ -62,18 +62,22 @@ def _get_deps_enforcer_cfg(
         # off/error/warn
         strict_deps_mode = None,
         unused_deps_mode = None):
-    info = _collect_deps_enforcer_info(ctx)
-    strict_deps_mode = strict_deps_mode or _default_strict_deps(ctx)
-    unused_deps_mode = unused_deps_mode or _default_unused_deps(ctx)
-    unused_deps_ignored_jars = depset(transitive = [
-        d[JavaInfo].compile_jars
-        for d in getattr(ctx.attr, "unused_dependency_checker_ignored_targets", [])
-    ] + [info.unused_deps_ignored_jars])
-    effective_direct_jars = depset(transitive = [direct_jars, info.direct_jars_from_exports])
+    labels = {}
+    unused_deps_ignored_jars = []
+    direct_jars_from_exports = []
+    for t in getattr(ctx.attr, "deps", []):
+        #        if _EnforcerAspectInfo in t:
+        labels.update(t[_EnforcerAspectInfo].labels)
+        unused_deps_ignored_jars += [t[_EnforcerAspectInfo].unused_deps_ignored_jars]
+        direct_jars_from_exports += [t[_EnforcerAspectInfo].direct_jars_from_exports]
+
     return struct(
-        direct_jars = effective_direct_jars,
-        unused_deps_ignored_jars = unused_deps_ignored_jars,
-        labels = info.labels,
+        direct_jars = depset(transitive = [direct_jars] + direct_jars_from_exports),
+        unused_deps_ignored_jars = depset(transitive = [
+            d[JavaInfo].compile_jars
+            for d in getattr(ctx.attr, "unused_dependency_checker_ignored_targets", [])
+        ] + unused_deps_ignored_jars),
+        labels = labels,
         strict_deps_mode = strict_deps_mode or _default_strict_deps(ctx),
         unused_deps_mode = unused_deps_mode or _default_unused_deps(ctx),
     )
