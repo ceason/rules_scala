@@ -5,7 +5,8 @@ jdeps_plugin_attrs = {
     ),
     "_jdeps_jar_merger": attr.label(
         default = Label("//src/java/io/bazel/rulesscala/scalac:jdeps_jar_merger"),
-        providers = [[JavaInfo]],
+        executable = True,
+        cfg = "host",
     ),
 }
 
@@ -58,10 +59,12 @@ def _collect_deps_enforcer_info(ctx, rule_attr = None):
 def _get_deps_enforcer_cfg(
         ctx,
         # list[depset[File]]
-        direct_jars = [],
+        direct_jars = None,
         # off/error/warn
         strict_deps_mode = None,
         unused_deps_mode = None):
+    if direct_jars == None:
+        fail("direct_jars cannot be 'None', wanted list[depset[File]]")
     labels = {}
     unused_deps_ignored_jars = []
     direct_jars_from_exports = []
@@ -130,11 +133,37 @@ def merge_jdeps_jars(
 
         # passed through to enforcer config
         **kwargs):
+    cfg = _get_deps_enforcer_cfg(ctx, **kwargs)
     args = ctx.actions.args()
+    args.add("--output_jar", output)
+    if output_jdeps:
+        args.add("--output_jdeps", output_jdeps)
+    for f in jars:
+        args.add("--input_jar", f)
+    for f in jdeps:
+        args.add("--input_jdeps", f)
+    args.add("--strict_deps_mode", cfg.strict_deps_mode)
+    args.add("--unused_deps_mode", cfg.unused_deps_mode)
+    args.add("--unused_deps_ignored_jars", cfg.unused_deps_ignored_jars)
+    args.add("--direct_jars", cfg.direct_jars)
+    for actual, exported_from in cfg.labels.items():
+        args.add_joined(
+            "--deps_exported_labels",
+            [actual, exported_from],
+            join_with = "::",  # ':' is reserved & therefore won't collide
+        )
+    tools, _, input_manifests = ctx.resolve_command(tools = [ctx.attr._jdeps_jar_merger])
+    ctx.actions.run(
+        inputs = jars + jdeps,
+        outputs = [output] + (
+            [output_jdeps] if output_jdeps else []
+        ),
+        arguments = [args],
+        executable = ctx.executable._jdeps_jar_merger,
+        tools = tools,
+        input_manifests = input_manifests,
+    )
 
-    fail("Unimplemented.")
-
-# Returns depset[File] that needs to go into compilation action input
 def add_scalac_jdeps_plugin_args(
         ctx,
         args,
@@ -146,6 +175,7 @@ def add_scalac_jdeps_plugin_args(
 
         # passed through to enforcer config
         **kwargs):
+    """Returns depset[File] that needs to go into compilation action input"""
     if not output_jdeps:
         fail("Must provide a File for output_jdeps")
     jdeps_jars = ctx.attr._scalac_jdeps_plugin[JavaInfo].transitive_runtime_jars

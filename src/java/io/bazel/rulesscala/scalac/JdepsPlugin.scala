@@ -41,7 +41,7 @@ class JdepsPlugin(val global: Global) extends Plugin {
     override def newPhase(prev: Phase): StdPhase = new StdPhase(prev) {
       override def run(): Unit = {
         super.run()
-        val usedJars = findUsedJars.intersect(cfg.classpathJars)
+        val usedJars = findExplicitlyUsedJars.intersect(cfg.classpathJars)
         val jdeps = buildJdeps(usedJars)
         // enforce strict/unused deps as appropriate
         val enforcer = new JdepsEnforcer(jdeps, cfg.enforcerArgs.asJava)
@@ -119,7 +119,7 @@ object JdepsPlugin {
     deps.build()
   }
 
-  def findUsedJars(implicit global: Global): Set[String] = {
+  def findExplicitlyUsedJars(implicit global: Global): Set[String] = {
     import global._
     val jars = collection.mutable.Set[String]()
     // TODO: distinguish between direct & indirect jars

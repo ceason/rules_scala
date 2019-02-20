@@ -36,13 +36,15 @@ java_library(
     ],
 )
 
-java_library(
+java_binary(
     name = "jdeps_jar_merger",
     srcs = ["JdepsJarMerger.java"],
+    main_class = "io.bazel.rulesscala.scalac.JdepsJarMerger",
     visibility = ["//visibility:public"],
     deps = [
         ":jdeps_enforcer",
         ":options",
+        "//src/java/com/google/devtools/build/lib/view/proto:deps",
     ],
 )
 

@@ -13,6 +13,7 @@ load(
     "write_manifest_file",
 )
 load("//scala/private:impl_helper.bzl", "impl_helper")
+load("//scala/private:jdeps_plugin.bzl", _jdeps_plugin_attrs = "jdeps_plugin_attrs")
 load("@io_bazel_rules_scala//thrift:thrift_info.bzl", "ThriftInfo")
 load(
     "@io_bazel_rules_scala//thrift:thrift.bzl",
@@ -303,7 +304,7 @@ _implicit_compile_deps = attr.label_list(
 scrooge_aspect = aspect(
     implementation = _scrooge_aspect_impl,
     attr_aspects = ["deps"],
-    attrs = {
+    attrs = _jdeps_plugin_attrs + {
         "_pluck_scrooge_scala": attr.label(
             executable = True,
             cfg = "host",

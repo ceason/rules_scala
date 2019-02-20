@@ -1,18 +1,12 @@
 load(":pack_jar.bzl", "pack_jar")
-load(":jdeps_plugin.bzl", "add_scalac_jdeps_plugin_args", "merge_jdeps_jars", "has_jdeps_plugin")
+load(":jdeps_plugin.bzl", "add_scalac_jdeps_plugin_args", "has_jdeps_plugin", "merge_jdeps_jars")
 
-
-# Gets compile jars from this provider including those from its exported targets
-# Returns list[File], beginning with the direct jars
-
-# helps filter inputs to scalac (eg unneeded files from extracted srcjars)
 def _filter_scalac_inputs(file):
+    """helps filter inputs to scalac (eg unneeded files from extracted srcjars)"""
     if file.extension in ["scala", "java"]:
         return file.path
-    else:
-        return []
+    return []
 
-# Low leverl compiler wrapper for scalac
 def scalac(
         ctx,
 
@@ -35,6 +29,7 @@ def scalac(
         # off/error/warn
         strict_deps_mode = None,
         unused_deps_mode = None):
+    """Low level compiler wrapper for scalac"""
     tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
 
     # get implicit compile/runtime jars for the rule
@@ -143,8 +138,8 @@ def scalac(
             for f in getattr(ctx.attr, "scalac_jvm_flags", [])
         ] + [args],
     )
+    return
 
-# Compiles srcs & returns a JavaInfo provider
 def compile(
         ctx,
 
@@ -165,6 +160,7 @@ def compile(
         # String
         resource_strip_prefix = None,
         unused_deps_mode = None,
+        strict_deps_mode = None,
 
         # list[JavaInfo]
         deps = [],
@@ -177,45 +173,40 @@ def compile(
 
         # kwargs are passed to 'scalac()'
         **kwargs):
+    """ Compiles srcs & returns a JavaInfo provider"""
     if "output_jdeps" in kwargs:
         fail("Cannot set reserved kwarg 'output_jdeps' in compile()")
+
     # Files which will (maybe) be produced by actions
+    output_classjar = ctx.actions.declare_file("%s-class.jar" % output.basename[:-len(".jar")], sibling = output)
     output_jdeps = None
-    scalac_output = ctx.actions.declare_file("%s-class.jar" % output.basename[:-len(".jar")], sibling = output)
+    scalac_classjar = None
     scalac_jdeps = None
-    javac_output = None
+    javac_classjar = None
     javac_jdeps = None
 
     # info we'll use to determine which files will be generated
+    implicit_deps = [d[JavaInfo] for d in ctx.attr._scala_toolchain]
     java_files = [f for f in source_files if f.extension == "java"]
-    will_compile_java = (java_files or source_jars) and getattr(ctx.attr, "expect_java_output", True)
+    needs_java_compilation = (java_files or source_jars) and getattr(ctx.attr, "expect_java_output", True)
 
+    # determine which files to generate & wire up dependent actions
     if has_jdeps_plugin(ctx):
         output_jdeps = ctx.actions.declare_file("%s.jdeps" % output.basename[:-len(".jar")], sibling = output)
 
-    # compile scala
-    scalac(
-        ctx,
-        source_jars = source_jars,
-        source_files = source_files,
-        output = scalac_output,
-        output_statsfile = output_statsfile,
-        output_jdeps = output_jdeps,
-        deps = deps,
-        unused_deps_mode = "off" if will_compile_java else unused_deps_mode,
-        **kwargs
-    )
-
-    implicit_deps = [d[JavaInfo] for d in ctx.attr._scala_toolchain]
-    # maybe compile java, unless it's been explicitly turned off
-
-    if will_compile_java:
-        javac_output = ctx.actions.declare_file("%s-java-class.jar" % output.basename[:-len(".jar")], sibling = output)
+    if not needs_java_compilation:
+        scalac_classjar = output_classjar
+        scalac_jdeps = output_jdeps
+    else:
+        scalac_classjar = ctx.actions.declare_file("%s-scala-class.jar" % output.basename[:-len(".jar")], sibling = output)
+        if output_jdeps:
+            scalac_jdeps = ctx.actions.declare_file("%s.jdeps" % scalac_classjar.basename[:-len(".jar")], sibling = output)
+        javac_classjar = ctx.actions.declare_file("%s-java-class.jar" % output.basename[:-len(".jar")], sibling = output)
         javac_jdeps = java_common.compile(
             ctx,
             source_jars = source_jars,
             source_files = java_files,
-            output = javac_output,
+            output = javac_classjar,
             javac_opts = [
                 ctx.expand_location(s, getattr(ctx.attr, "data", []))
                 for s in getattr(ctx.attr, "javacopts", []) +
@@ -224,27 +215,43 @@ def compile(
             ],
             deps = deps +
                    implicit_deps +
-                   [JavaInfo(compile_jar = scalac_output, output_jar = scalac_output)],
+                   [JavaInfo(compile_jar = scalac_classjar, output_jar = scalac_classjar)],
             java_toolchain = ctx.attr._java_toolchain,
             host_javabase = ctx.attr._host_javabase,
-            strict_deps = "OFF",
+            strict_deps = "off",
         ).outputs.jdeps
-
-        # combine the java and scala compiled jars
-        full_compile_jar = ctx.actions.declare_file("%s-merged-class.jar" % output.basename[:-len(".jar")], sibling = output)
-        pack_jar(
+        merge_jdeps_jars(
             ctx,
-            output = full_compile_jar,
-            jars = [scalac_output, javac_output],
+            output = output_classjar,
+            output_jdeps = output_jdeps,
+            jars = [javac_classjar, scalac_classjar],
+            jdeps = [javac_jdeps] + (
+                [scalac_jdeps] if scalac_jdeps else []
+            ),
+            unused_deps_mode = unused_deps_mode,
+            strict_deps_mode = strict_deps_mode,
+            direct_jars = depset(transitive = [d.compile_jars for d in deps]),
         )
-    else:
-        full_compile_jar = scalac_output
+
+    # compile scala
+    scalac(
+        ctx,
+        source_jars = source_jars,
+        source_files = source_files,
+        output = scalac_classjar,
+        output_statsfile = output_statsfile,
+        output_jdeps = scalac_jdeps,
+        deps = deps,
+        unused_deps_mode = "off" if needs_java_compilation else unused_deps_mode,
+        strict_deps_mode = "off" if needs_java_compilation else strict_deps_mode,
+        **kwargs
+    )
 
     # pack the compiled jar with resources
     pack_jar(
         ctx,
         output = output,
-        jars = [full_compile_jar] + resource_jars,
+        jars = [output_classjar] + resource_jars,
         resource_strip_prefix = resource_strip_prefix,
         resources = resources,
         classpath_resources = classpath_resources,
@@ -262,17 +269,17 @@ def compile(
 
     # create a label-stamped compile_jar (using ijar, if possible)
     if use_ijar:
-        compile_jar = java_common.run_ijar(ctx.actions, jar = full_compile_jar, target_label = ctx.label, java_toolchain = ctx.attr._java_toolchain)
+        compile_jar = java_common.run_ijar(ctx.actions, jar = output_classjar, target_label = ctx.label, java_toolchain = ctx.attr._java_toolchain)
     else:
-        compile_jar = java_common.stamp_jar(ctx.actions, jar = full_compile_jar, target_label = ctx.label, java_toolchain = ctx.attr._java_toolchain)
+        compile_jar = java_common.stamp_jar(ctx.actions, jar = output_classjar, target_label = ctx.label, java_toolchain = ctx.attr._java_toolchain)
 
     return JavaInfo(
         output_jar = output,
         compile_jar = compile_jar,
         source_jar = srcjar,
         neverlink = neverlink,
-        deps = deps,
+        deps = deps + implicit_deps,
         exports = exports,
-        runtime_deps = runtime_deps + implicit_deps,
+        runtime_deps = runtime_deps,
         jdeps = output_jdeps,
     )
