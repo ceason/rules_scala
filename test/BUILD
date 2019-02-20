@@ -320,10 +320,15 @@ scala_binary(
     deps = ["MixJavaScalaSrcjarLib"],
 )
 
-scala_binary(
+java_library(
     name = "JavaOnlySources",
     srcs = ["src/main/scala/scalarules/test/only_java/Alpha.java"],
+)
+
+java_binary(
+    name = "JavaOnlySourcesBinary",
     main_class = "scalarules.test.Alpha",
+    runtime_deps = [":JavaOnlySources"]
 )
 
 scala_library(
@@ -418,7 +423,7 @@ scala_specs2_junit_test(
 ) for binary in [
     "JavaBinary",
     "JavaBinary2",
-    "JavaOnlySources",
+    "JavaOnlySourcesBinary",
     "MixJavaScalaLibBinary",
     "MixJavaScalaSrcjarLibBinary",
     "ScalaBinary",

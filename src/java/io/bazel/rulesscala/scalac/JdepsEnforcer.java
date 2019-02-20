@@ -24,6 +24,7 @@ public class JdepsEnforcer extends Options {
   EnforcementMode strictDeps = EnforcementMode.OFF;
   EnforcementMode unusedDeps = EnforcementMode.OFF;
   Set<String> unusedDepsIgnoredJars = new HashSet<>();
+  Set<String> strictDepsIgnoredJars = new HashSet<>();
   Set<String> directJars = new HashSet<>();
   Map<String, String> depsExportedLabels = new HashMap<>();
   Set<String> usedJars;
@@ -43,6 +44,9 @@ public class JdepsEnforcer extends Options {
           break;
         case "--unused_deps_ignored_jars":
           unusedDepsIgnoredJars.addAll(getList(File.pathSeparator));
+          break;
+        case "--strict_deps_ignored_jars":
+          strictDepsIgnoredJars.addAll(getList(File.pathSeparator));
           break;
         case "--direct_jars":
           directJars.addAll(getList(File.pathSeparator));
@@ -99,15 +103,20 @@ public class JdepsEnforcer extends Options {
   List<String> getViolatingStrictDeps() {
     return usedJars.stream()
         .filter(not(directJars::contains))
+        .filter(not(strictDepsIgnoredJars::contains))
         .filter(this::jarHasClassfiles)
         .map(this::getLabelFromJar)
         .map(this::resolveExportedLabel)
         .map(target -> (
-            "Target '{target}' is used but isn't explicitly declared, please add it to the deps.\n"
-                + "You can use the following buildozer command:\n"
-                + "buildozer 'add deps {target}' {currentTarget}")
-            .replace("{target}", target)
-            .replace("{currentTarget}", currentTarget)
+                "Target '{target}' is used but isn't explicitly declared, please add it to the deps.\n"
+                    + "You can use the following buildozer command:\n"
+                    + "buildozer 'add deps {target}' {currentTarget}"
+//              + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
+//              + "\nUSED_LABELS:\n  " + usedLabels.stream().sorted().collect(Collectors.joining("\n  "))
+//              + "\nDIRECT_JARS:\n  " + directJars.stream().sorted().collect(Collectors.joining("\n  "))
+            )
+                .replace("{target}", target)
+                .replace("{currentTarget}", currentTarget)
         )
         .collect(Collectors.toList());
   }
@@ -129,7 +138,7 @@ public class JdepsEnforcer extends Options {
       return jar.stream()
           .anyMatch(f -> f.getName().endsWith(".class"));
     } catch (IOException e) {
-      throw new RuntimeException(e.getMessage());
+      throw new RuntimeException("Couldn't open " + jarPath, e);
     }
   }
 

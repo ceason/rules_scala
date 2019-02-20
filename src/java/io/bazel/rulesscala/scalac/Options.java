@@ -13,10 +13,12 @@ public class Options {
 
   private String currentFlag;
   private Queue<String> args;
+  private String[] originalArgs;
 
 
   protected Options(List<String> args) {
     this.args = new LinkedList<>(args);
+    originalArgs = args.toArray(new String[0]);
   }
 
   protected RuntimeException unrecognizedFlagException() {
@@ -38,7 +40,8 @@ public class Options {
     String v = args.remove();
     if (!args.isEmpty() && !args.peek().startsWith("--")) {
       throw new IllegalArgumentException(
-          "Got multiple values for single value flag " + currentFlag);
+          "Got multiple values for single value flag " + currentFlag + "\n  " + String
+              .join("\n  ", originalArgs));
     }
     return v;
   }
@@ -58,7 +61,9 @@ public class Options {
       }
     }
     if (r.isEmpty()) {
-      throw new IllegalArgumentException("No values specified for flag " + currentFlag);
+      throw new IllegalArgumentException(
+          "No values specified for flag " + currentFlag + "\n  " + String
+              .join("\n  ", originalArgs));
     }
     return r;
   }

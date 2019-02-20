@@ -231,6 +231,10 @@ def compile(
             unused_deps_mode = unused_deps_mode,
             strict_deps_mode = strict_deps_mode,
             direct_jars = depset(transitive = [d.compile_jars for d in deps]),
+            classpath_jars = [
+                d.transitive_compile_time_jars
+                for d in deps
+            ],
         )
 
     # compile scala

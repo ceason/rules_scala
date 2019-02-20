@@ -83,6 +83,11 @@ def _get_deps_enforcer_cfg(
         labels = labels,
         strict_deps_mode = strict_deps_mode or _default_strict_deps(ctx),
         unused_deps_mode = unused_deps_mode or _default_unused_deps(ctx),
+        strict_deps_ignored_jars = depset(transitive = [
+            # TODO: should we ignore all transitive from the toolchain, or just direct??
+            d[JavaInfo].transitive_compile_time_jars
+            for d in ctx.attr._scala_toolchain
+        ]),
     )
 
 def _impl(target, ctx):
@@ -131,6 +136,9 @@ def merge_jdeps_jars(
         jars = [],
         jdeps = [],
 
+        # list[depset[File]]
+        classpath_jars = [],
+
         # passed through to enforcer config
         **kwargs):
     cfg = _get_deps_enforcer_cfg(ctx, **kwargs)
@@ -142,10 +150,12 @@ def merge_jdeps_jars(
         args.add("--input_jar", f)
     for f in jdeps:
         args.add("--input_jdeps", f)
+    args.add("--rule_label", str(ctx.label))
     args.add("--strict_deps_mode", cfg.strict_deps_mode)
     args.add("--unused_deps_mode", cfg.unused_deps_mode)
-    args.add("--unused_deps_ignored_jars", cfg.unused_deps_ignored_jars)
-    args.add("--direct_jars", cfg.direct_jars)
+    args.add_all("--unused_deps_ignored_jars", cfg.unused_deps_ignored_jars)
+    args.add_all("--strict_deps_ignored_jars", cfg.strict_deps_ignored_jars)
+    args.add_all("--direct_jars", cfg.direct_jars)
     for actual, exported_from in cfg.labels.items():
         args.add_joined(
             "--deps_exported_labels",
@@ -154,7 +164,7 @@ def merge_jdeps_jars(
         )
     tools, _, input_manifests = ctx.resolve_command(tools = [ctx.attr._jdeps_jar_merger])
     ctx.actions.run(
-        inputs = jars + jdeps,
+        inputs = depset(direct = jars + jdeps, transitive = classpath_jars),
         outputs = [output] + (
             [output_jdeps] if output_jdeps else []
         ),
@@ -204,6 +214,13 @@ def add_scalac_jdeps_plugin_args(
         join_with = ctx.configuration.host_path_separator,
         format_joined = "-P:scala-jdeps:dep_enforcer:unused_deps_ignored_jars:%s",
     )
+    args.add_joined(
+        "--scalac_opts",
+        cfg.strict_deps_ignored_jars,
+        join_with = ctx.configuration.host_path_separator,
+        format_joined = "-P:scala-jdeps:dep_enforcer:strict_deps_ignored_jars:%s",
+    )
+
     args.add_joined(
         "--scalac_opts",
         cfg.direct_jars,
