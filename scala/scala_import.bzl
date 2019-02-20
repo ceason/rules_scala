@@ -1,4 +1,3 @@
-load("@io_bazel_rules_scala//scala:jars_to_labels.bzl", "JarsToLabelsInfo")
 load("//scala/private:pack_jar.bzl", "pack_jar")
 
 _SOURCE_JAR_SUFFIXES = [

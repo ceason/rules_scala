@@ -13,21 +13,6 @@
 # limitations under the License.
 """Rules for supporting the Scala language."""
 
-load(
-    "@io_bazel_rules_scala//scala:providers.bzl",
-    "create_scala_provider",
-    _ScalacProvider = "ScalacProvider",
-)
-load(
-    ":common.bzl",
-    "add_labels_of_jars_to",
-    "collect_jars",
-    "collect_srcjars",
-    "create_java_provider",
-    "not_sources_jar",
-    "write_manifest",
-)
-load("@io_bazel_rules_scala//scala:jars_to_labels.bzl", "JarsToLabelsInfo")
 load(":impl_helper.bzl", "impl_helper")
 
 def scala_library_impl(ctx):
