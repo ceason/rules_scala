@@ -96,8 +96,8 @@ def scalac(
             strict_deps_mode = strict_deps_mode,
             unused_deps_mode = unused_deps_mode,
             output_jdeps = output_jdeps,
-            direct_jars = depset(transitive = [d.compile_jars for d in deps]),
-            classpath_jars = classpath_jars,
+            deps = deps,
+            implicit_deps = implicit_deps,
         )
         compile_inputs += [jdeps_jars]
         compile_outputs += [output_jdeps]
@@ -230,11 +230,8 @@ def compile(
             ),
             unused_deps_mode = unused_deps_mode,
             strict_deps_mode = strict_deps_mode,
-            direct_jars = depset(transitive = [d.compile_jars for d in deps]),
-            classpath_jars = [
-                d.transitive_compile_time_jars
-                for d in deps
-            ],
+            deps = deps,
+            implicit_deps = [t[JavaInfo] for t in ctx.attr._scala_toolchain]
         )
 
     # compile scala

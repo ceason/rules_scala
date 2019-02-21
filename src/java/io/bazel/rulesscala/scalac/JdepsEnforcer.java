@@ -23,13 +23,13 @@ public class JdepsEnforcer extends Options {
 
   EnforcementMode strictDeps = EnforcementMode.OFF;
   EnforcementMode unusedDeps = EnforcementMode.OFF;
-  Set<String> unusedDepsIgnoredJars = new HashSet<>();
+  //  Set<String> unusedDepsIgnoredJars = new HashSet<>();
+  Set<String> unusedDepsIgnoredLabels = new HashSet<>();
   Set<String> strictDepsIgnoredJars = new HashSet<>();
   Set<String> directJars = new HashSet<>();
   Map<String, String> depsExportedLabels = new HashMap<>();
   Set<String> usedJars;
-  Set<String> usedLabels;
-  Set<String> directLabels;
+  Set<String> directLabels = new HashSet<>();
   String currentTarget;
 
   JdepsEnforcer(Dependencies jdeps, List<String> args) {
@@ -42,8 +42,11 @@ public class JdepsEnforcer extends Options {
         case "--unused_deps_mode":
           unusedDeps = EnforcementMode.valueOf(getValue().toUpperCase());
           break;
-        case "--unused_deps_ignored_jars":
-          unusedDepsIgnoredJars.addAll(getList(File.pathSeparator));
+        case "--unused_deps_ignored_labels":
+          unusedDepsIgnoredLabels.addAll(getList("::"));
+          break;
+        case "--direct_labels":
+          directLabels.addAll(getList("::"));
           break;
         case "--strict_deps_ignored_jars":
           strictDepsIgnoredJars.addAll(getList(File.pathSeparator));
@@ -69,30 +72,40 @@ public class JdepsEnforcer extends Options {
         .filter(d -> d.getKind() == Kind.EXPLICIT)
         .map(Dependency::getPath)
         .collect(Collectors.toSet());
-    usedLabels = usedJars.stream()
-        .map(this::getLabelFromJar)
-        .map(this::resolveExportedLabel)
-        .collect(Collectors.toSet());
-    directLabels = directJars.stream()
-        .map(this::getLabelFromJar)
-        .collect(Collectors.toSet());
   }
 
   List<String> getViolatingUnusedDeps() {
-    return directJars.stream()
-        .filter(not(usedJars::contains))
-        .filter(not(unusedDepsIgnoredJars::contains))
+    Set<String> usedLabels = usedJars.stream()
         .filter(this::jarHasClassfiles)
         .map(this::getLabelFromJar)
+        .collect(Collectors.toSet());
+
+    Set<String> resolvedUsedLabels = usedLabels.stream()
         .map(this::resolveExportedLabel)
         .filter(not(usedLabels::contains))
+        .collect(Collectors.toSet());
+
+    return directLabels.stream()
+        .filter(not(unusedDepsIgnoredLabels::contains))
+        .filter(not(usedLabels::contains))
+        .filter(not(resolvedUsedLabels::contains))
         .map(target -> (
                 "Target '{target}' is specified as a dependency to {currentTarget} but isn't used, please remove it from the deps.\n"
                     + "You can use the following buildozer command:\n"
                     + "buildozer 'remove deps {target}' {currentTarget}"
-//                + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
-//                + "\nUSED_LABELS:\n  " + usedLabels.stream().sorted().collect(Collectors.joining("\n  "))
-//                + "\nIGNORED_JARS:\n  " + unusedDepsIgnoredJars.stream().sorted().collect(Collectors.joining("\n  "))
+                    + "\nUSED_JARS:\n  " + usedJars.stream().sorted()
+                    .collect(Collectors.joining("\n  "))
+                    + "\nUSED_LABELS:\n  " + usedLabels.stream().sorted()
+                    .collect(Collectors.joining("\n  "))
+                    + "\nRESOLVED_USED_LABELS:\n  " + resolvedUsedLabels.stream().sorted()
+                    .collect(Collectors.joining("\n  "))
+                    + "\nDIRECT_LABELS:\n  " + directLabels.stream().sorted()
+                    .collect(Collectors.joining("\n  "))
+                    + "\nIGNORED_LABELS:\n  " + unusedDepsIgnoredLabels.stream().sorted()
+                    .collect(Collectors.joining("\n  "))
+                    + "\nDEPS_EXPORTED_LABELS:\n  " + depsExportedLabels.keySet().stream().sorted()
+                    .map(k -> String.format("%s => %s", k, depsExportedLabels.get(k)))
+                    .collect(Collectors.joining("\n  "))
             )
                 .replace("{target}", target)
                 .replace("{currentTarget}", currentTarget)
@@ -102,18 +115,19 @@ public class JdepsEnforcer extends Options {
 
   List<String> getViolatingStrictDeps() {
     return usedJars.stream()
-        .filter(not(directJars::contains))
         .filter(not(strictDepsIgnoredJars::contains))
-        .filter(this::jarHasClassfiles)
+        .filter(not(directJars::contains))
         .map(this::getLabelFromJar)
+        .filter(not(directLabels::contains))
         .map(this::resolveExportedLabel)
+        .filter(not(directLabels::contains))
         .map(target -> (
                 "Target '{target}' is used but isn't explicitly declared, please add it to the deps.\n"
                     + "You can use the following buildozer command:\n"
                     + "buildozer 'add deps {target}' {currentTarget}"
-//              + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
-//              + "\nUSED_LABELS:\n  " + usedLabels.stream().sorted().collect(Collectors.joining("\n  "))
-//              + "\nDIRECT_JARS:\n  " + directJars.stream().sorted().collect(Collectors.joining("\n  "))
+                    + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
+                    + "\nIGNORED_JARS:\n  " + strictDepsIgnoredJars.stream().sorted().collect(Collectors.joining("\n  "))
+              + "\nDIRECT_JARS:\n  " + directJars.stream().sorted().collect(Collectors.joining("\n  "))
             )
                 .replace("{target}", target)
                 .replace("{currentTarget}", currentTarget)
@@ -128,8 +142,10 @@ public class JdepsEnforcer extends Options {
       return jar.getManifest()
           .getMainAttributes()
           .getValue("Target-Label");
-    } catch (IOException e) {
+    } catch (IllegalArgumentException e) {
       return jarPath;
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
   }
 
