@@ -10,54 +10,55 @@ jdeps_plugin_attrs = {
     ),
 }
 
-_EnforcerAspectInfo = provider(
+_AspectInfo = provider(
     fields = {
-        "labels": 'Map of origin/jar Label => "exported as Label"',
         "direct_jars_from_exports": "depset[File] of direct jars from exports",
+        "aliased_labels": "depset[string] of labels formatted as '<label_alias>::<label>[::<label>...]'",
     },
 )
 
+# ':' is reserved & therefore won't collide
+_LABEL_DELIMITER = "::"
+
 # Returns mapping between labels in 'deps' and labels which those deps export.
-def _collect_deps_enforcer_info(ctx, rule_attr = None):
-    rule_attr = rule_attr or ctx.attr
-    labels = {}
-    direct_labels = {}
-
-    direct_jars_from_exports = []
-
-    for t in getattr(rule_attr, "deps", []):
-        if _EnforcerAspectInfo in t:
-            labels.update(t[_EnforcerAspectInfo].labels)
-
-    my_label = str(ctx.label)
-    for t in getattr(rule_attr, "exports", []):
-        direct_labels[str(t.label)] = my_label
-        if _EnforcerAspectInfo in t:
-            labels.update(t[_EnforcerAspectInfo].labels)
-
-            direct_jars_from_exports += [t[_EnforcerAspectInfo].direct_jars_from_exports]
+def _collect_deps_enforcer_info(ctx):
+    # aliased_labels
+    transitive_aliased_labels = []
+    direct_aliased_labels = []
+    for t in getattr(ctx.rule.attr, "exports", []):
+        if _AspectInfo in t:
+            transitive_aliased_labels += [t[_AspectInfo].aliased_labels]
         if JavaInfo in t:
-            direct_jars_from_exports += [t[JavaInfo].compile_jars]
-
-    # needed to map the labels coming out of aspect produced jars to the rule that puts them
-    # in the dependency graph.
+            direct_aliased_labels += [str(t.label)]
     if ctx.rule.kind in [
+        # needed to map the labels coming out of aspect-produced jars
+        #  to the rule that puts them in the dependency graph.
         "scrooge_scala_library",
         "java_proto_library",
         "scalapb_proto_library",
     ]:
         for t in getattr(ctx.rule.attr, "deps", []):
-            direct_labels[str(t.label)] = my_label
+            direct_aliased_labels += [str(t.label)]
+    aliased_labels = depset(
+        order = "topological",
+        direct = [_LABEL_DELIMITER.join(
+            [str(ctx.label)] + sorted(direct_aliased_labels),
+        )] if direct_aliased_labels else [],
+        transitive = transitive_aliased_labels,
+    )
 
-    # update 'exportedFrom' for anything that we're exporting
-    for k, v in labels.items():
-        if v in direct_labels:
-            labels[k] = my_label
-    labels.update(direct_labels)
+    # direct_jars_from_exports
+    transitive_direct_jars = []
+    for t in getattr(ctx.rule.attr, "exports", []):
+        if JavaInfo in t:
+            transitive_direct_jars += [t[JavaInfo].compile_jars]
+        if _AspectInfo in t:
+            transitive_direct_jars += [t[_AspectInfo].direct_jars_from_exports]
+    direct_jars_from_exports = depset(transitive = transitive_direct_jars)
 
-    return _EnforcerAspectInfo(
-        labels = labels,
-        direct_jars_from_exports = depset(transitive = direct_jars_from_exports),
+    return _AspectInfo(
+        direct_jars_from_exports = direct_jars_from_exports,
+        aliased_labels = aliased_labels,
     )
 
 def _get_jdeps_config(
@@ -73,18 +74,9 @@ def _get_jdeps_config(
         # off/error/warn
         strict_deps_mode = None,
         unused_deps_mode = None):
-    if not output_jdeps:
-        fail("Must provide a File for output_jdeps")
-
-    labels = {}
-
-    direct_jars_from_exports = []
-    for t in getattr(ctx.attr, "deps", []):
-        labels.update(t[_EnforcerAspectInfo].labels)
-
-        direct_jars_from_exports += [t[_EnforcerAspectInfo].direct_jars_from_exports]
-
     return struct(
+        strict_deps_mode = strict_deps_mode or _default_strict_deps(ctx),
+        unused_deps_mode = unused_deps_mode or _default_unused_deps(ctx),
         direct_labels = [
             str(t.label)
             for t in getattr(ctx.attr, "deps", [])
@@ -92,28 +84,31 @@ def _get_jdeps_config(
         direct_jars = depset(transitive = [
             d.compile_jars
             for d in deps
-        ] + direct_jars_from_exports),
+        ] + [
+            t[_AspectInfo].direct_jars_from_exports
+            for t in getattr(ctx.attr, "deps", [])
+        ]),
+        aliased_labels = depset(transitive = [
+            t[_AspectInfo].aliased_labels
+            for t in getattr(ctx.attr, "deps", [])
+        ]),
         classpath_jars = depset(transitive = [
             d.transitive_compile_time_jars
-            for d in deps + implicit_deps
+            for d in implicit_deps + deps
         ]),
         unused_deps_ignored_labels = [
             str(t.label)
             for t in getattr(ctx.attr, "unused_dependency_checker_ignored_targets", [])
         ],
-        labels = labels,
-        strict_deps_mode = strict_deps_mode or _default_strict_deps(ctx),
-        unused_deps_mode = unused_deps_mode or _default_unused_deps(ctx),
         strict_deps_ignored_jars = depset(transitive = [
             # TODO: should we ignore all transitive from the toolchain, or just direct??
-            d[JavaInfo].transitive_compile_time_jars
-            for d in ctx.attr._scala_toolchain
+            d.transitive_compile_time_jars
+            for d in implicit_deps
         ]),
-        output_jdeps = output_jdeps,
     )
 
 def _impl(target, ctx):
-    info = _collect_deps_enforcer_info(ctx, rule_attr = ctx.rule.attr)
+    info = _collect_deps_enforcer_info(ctx)
     return [info]
 
 jdeps_enforcer_aspect = aspect(
@@ -152,6 +147,7 @@ def merge_jdeps_jars(
         ctx,
         # File
         output = None,
+        output_jdeps = None,
 
         # list[File]
         jars = [],
@@ -162,7 +158,7 @@ def merge_jdeps_jars(
     cfg = _get_jdeps_config(ctx, **kwargs)
     args = ctx.actions.args()
     args.add("--output_jar", output)
-    args.add("--output_jdeps", cfg.output_jdeps)
+    args.add("--output_jdeps", output_jdeps)
     for f in jars:
         args.add("--input_jar", f)
     for f in jdeps:
@@ -174,16 +170,11 @@ def merge_jdeps_jars(
     args.add_all("--strict_deps_ignored_jars", cfg.strict_deps_ignored_jars)
     args.add_all("--direct_jars", cfg.direct_jars)
     args.add_all("--direct_labels", cfg.direct_labels)
-    for actual, exported_from in cfg.labels.items():
-        args.add_joined(
-            "--deps_exported_labels",
-            [actual, exported_from],
-            join_with = "::",  # ':' is reserved & therefore won't collide
-        )
+    args.add_all(cfg.aliased_labels, before_each = "--aliased_labels")
     tools, _, input_manifests = ctx.resolve_command(tools = [ctx.attr._jdeps_jar_merger])
     ctx.actions.run(
         inputs = depset(direct = jars + jdeps, transitive = [cfg.classpath_jars]),
-        outputs = [cfg.output_jdeps, output],
+        outputs = [output_jdeps, output],
         arguments = [args],
         executable = ctx.executable._jdeps_jar_merger,
         tools = tools,
@@ -194,7 +185,10 @@ def add_scalac_jdeps_plugin_args(
         ctx,
         args,
 
-        # passed through to enforcer config
+        # File
+        output_jdeps = None,
+
+        # passed through to jdeps config
         **kwargs):
     """Returns depset[File] that needs to go into compilation action input"""
 
@@ -210,7 +204,7 @@ def add_scalac_jdeps_plugin_args(
     )
     args.add("--scalac_opts", cfg.strict_deps_mode, format = "-P:scala-jdeps:dep_enforcer:strict_deps_mode:%s")
     args.add("--scalac_opts", cfg.unused_deps_mode, format = "-P:scala-jdeps:dep_enforcer:unused_deps_mode:%s")
-    args.add("--scalac_opts", cfg.output_jdeps, format = "-P:scala-jdeps:output:%s")
+    args.add("--scalac_opts", output_jdeps, format = "-P:scala-jdeps:output:%s")
     args.add("--scalac_opts", str(ctx.label), format = "-P:scala-jdeps:current-target:%s")
     args.add_joined(
         "--scalac_opts",
@@ -245,14 +239,10 @@ def add_scalac_jdeps_plugin_args(
         format_joined = "-P:scala-jdeps:dep_enforcer:direct_labels:%s",
     )
 
-    # Make a mapping between labels in 'deps' and labels which those deps export.
-    #  The dep enforcer needs this info.
-    for actual, exported_from in cfg.labels.items():
-        args.add_joined(
-            "--scalac_opts",
-            [actual, exported_from],
-            join_with = "::",  # ':' is reserved & therefore won't collide
-            format_joined = "-P:scala-jdeps:dep_enforcer:deps_exported_labels:%s",
-        )
+    args.add_all(
+        cfg.aliased_labels,
+        before_each = "--scalac_opts",
+        format_each = "-P:scala-jdeps:dep_enforcer:aliased_labels:%s",
+    )
 
     return jdeps_jars

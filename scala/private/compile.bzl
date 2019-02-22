@@ -51,7 +51,7 @@ def scalac(
     # classpath
     classpath_jars = depset(transitive = [
         d.transitive_compile_time_jars
-        for d in deps + implicit_deps
+        for d in implicit_deps + deps
     ])
     args.add("--scalac_opts", "-classpath")
     args.add_joined(
@@ -213,8 +213,8 @@ def compile(
                          getattr(ctx.attr, "javac_jvm_flags", []) +
                          java_common.default_javac_opts(ctx, java_toolchain_attr = "_java_toolchain")
             ],
-            deps = deps +
-                   implicit_deps +
+            deps = implicit_deps +
+                   deps +
                    [JavaInfo(compile_jar = scalac_classjar, output_jar = scalac_classjar)],
             java_toolchain = ctx.attr._java_toolchain,
             host_javabase = ctx.attr._host_javabase,
@@ -279,7 +279,7 @@ def compile(
         compile_jar = compile_jar,
         source_jar = srcjar,
         neverlink = neverlink,
-        deps = deps + implicit_deps,
+        deps = implicit_deps + deps,
         exports = exports,
         runtime_deps = runtime_deps,
         jdeps = output_jdeps,
