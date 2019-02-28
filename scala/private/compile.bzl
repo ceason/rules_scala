@@ -177,6 +177,14 @@ def compile(
     if "output_jdeps" in kwargs:
         fail("Cannot set reserved kwarg 'output_jdeps' in compile()")
 
+    # action inputs (& conditions determining which actions are necessary)
+    implicit_deps = [d[JavaInfo] for d in ctx.attr._scala_toolchain]
+    java_files = [f for f in source_files if f.extension == "java"]
+    scala_files = [f for f in source_files if f.extension == "scala"]
+    COMPILE_JAVA = bool(java_files or source_jars) and getattr(ctx.attr, "expect_java_output", True)
+    COMPILE_SCALA = bool(scala_files or source_jars)
+    COMPILE_MIXED = COMPILE_SCALA and COMPILE_JAVA
+
     # Files which will (maybe) be produced by actions
     output_classjar = ctx.actions.declare_file("%s-class.jar" % output.basename[:-len(".jar")], sibling = output)
     output_jdeps = None
@@ -185,23 +193,39 @@ def compile(
     javac_classjar = None
     javac_jdeps = None
 
-    # info we'll use to determine which files will be generated
-    implicit_deps = [d[JavaInfo] for d in ctx.attr._scala_toolchain]
-    java_files = [f for f in source_files if f.extension == "java"]
-    needs_java_compilation = (java_files or source_jars) and getattr(ctx.attr, "expect_java_output", True)
-
-    # determine which files to generate & wire up dependent actions
-    if has_jdeps_plugin(ctx):
-        output_jdeps = ctx.actions.declare_file("%s.jdeps" % output.basename[:-len(".jar")], sibling = output)
-
-    if not needs_java_compilation:
-        scalac_classjar = output_classjar
-        scalac_jdeps = output_jdeps
-    else:
-        scalac_classjar = ctx.actions.declare_file("%s-scala-class.jar" % output.basename[:-len(".jar")], sibling = output)
-        if output_jdeps:
-            scalac_jdeps = ctx.actions.declare_file("%s.jdeps" % scalac_classjar.basename[:-len(".jar")], sibling = output)
+    # make language-specific classjars if we're compiling mixed-mode
+    if COMPILE_MIXED:
         javac_classjar = ctx.actions.declare_file("%s-java-class.jar" % output.basename[:-len(".jar")], sibling = output)
+        scalac_classjar = ctx.actions.declare_file("%s-scala-class.jar" % output.basename[:-len(".jar")], sibling = output)
+    elif COMPILE_SCALA:
+        scalac_classjar = output_classjar
+    elif COMPILE_JAVA:
+        javac_classjar = output_classjar
+    else:
+        fail("Must provide either java or scala srcs.")
+    if not COMPILE_SCALA:
+        ctx.actions.write(output_statsfile, "")
+
+    # compile srcs as necessary
+    if COMPILE_SCALA:
+        if has_jdeps_plugin(ctx):
+            scalac_jdeps = ctx.actions.declare_file("%s.jdeps" % scalac_classjar.basename[:-len("-class.jar")], sibling = scalac_classjar)
+        scalac(
+            ctx,
+            source_jars = source_jars,
+            source_files = scala_files + java_files,
+            output = scalac_classjar,
+            output_statsfile = output_statsfile,
+            output_jdeps = scalac_jdeps,
+            deps = deps,
+            unused_deps_mode = "off" if COMPILE_MIXED else unused_deps_mode,
+            strict_deps_mode = "off" if COMPILE_MIXED else strict_deps_mode,
+            **kwargs
+        )
+    if COMPILE_JAVA:
+        java_compile_deps = implicit_deps + deps
+        if scalac_classjar:
+            java_compile_deps += [JavaInfo(compile_jar = scalac_classjar, output_jar = scalac_classjar)]
         javac_jdeps = java_common.compile(
             ctx,
             source_jars = source_jars,
@@ -213,40 +237,35 @@ def compile(
                          getattr(ctx.attr, "javac_jvm_flags", []) +
                          java_common.default_javac_opts(ctx, java_toolchain_attr = "_java_toolchain")
             ],
-            deps = implicit_deps +
-                   deps +
-                   [JavaInfo(compile_jar = scalac_classjar, output_jar = scalac_classjar)],
+            deps = java_compile_deps,
             java_toolchain = ctx.attr._java_toolchain,
             host_javabase = ctx.attr._host_javabase,
-            strict_deps = "off",
+            strict_deps = "off" if COMPILE_MIXED else ctx.fragments.java.strict_java_deps,
         ).outputs.jdeps
+
+    # merge jars+jdeps if we compiled both java & scala
+    if COMPILE_MIXED:
+        jdeps_to_merge = []
+        if scalac_jdeps and javac_jdeps:
+            jdeps_to_merge += [scalac_jdeps, javac_jdeps]
+            output_jdeps = ctx.actions.declare_file("%s.jdeps" % output.basename[:-len(".jar")], sibling = output)
         merge_jdeps_jars(
             ctx,
             output = output_classjar,
             output_jdeps = output_jdeps,
             jars = [javac_classjar, scalac_classjar],
-            jdeps = [javac_jdeps] + (
-                [scalac_jdeps] if scalac_jdeps else []
-            ),
+            jdeps = jdeps_to_merge,
             unused_deps_mode = unused_deps_mode,
             strict_deps_mode = strict_deps_mode,
             deps = deps,
-            implicit_deps = [t[JavaInfo] for t in ctx.attr._scala_toolchain]
+            implicit_deps = implicit_deps,
         )
-
-    # compile scala
-    scalac(
-        ctx,
-        source_jars = source_jars,
-        source_files = source_files,
-        output = scalac_classjar,
-        output_statsfile = output_statsfile,
-        output_jdeps = scalac_jdeps,
-        deps = deps,
-        unused_deps_mode = "off" if needs_java_compilation else unused_deps_mode,
-        strict_deps_mode = "off" if needs_java_compilation else strict_deps_mode,
-        **kwargs
-    )
+    elif COMPILE_JAVA:
+        output_jdeps = javac_jdeps
+    elif COMPILE_SCALA:
+        output_jdeps = scalac_jdeps
+    else:
+        fail("Unreachable.")
 
     # pack the compiled jar with resources
     pack_jar(
@@ -268,7 +287,7 @@ def compile(
         host_javabase = ctx.attr._host_javabase,
     )
 
-    # create a label-stamped compile_jar (using ijar, if possible)
+    # create a label-stamped compile_jar (using ijar, if allowed)
     if use_ijar:
         compile_jar = java_common.run_ijar(ctx.actions, jar = output_classjar, target_label = ctx.label, java_toolchain = ctx.attr._java_toolchain)
     else:
