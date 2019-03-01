@@ -120,8 +120,8 @@ test_expect_failure_or_warning_on_missing_direct_deps_with_expected_message() {
 }
 
 test_scala_library_expect_failure_on_missing_direct_deps_strict_is_disabled_by_default() {
-  expected_message="not found: value C"
   test_target='test_expect_failure/missing_direct_deps/internal_deps:transitive_dependency_user'
+  expected_message="buildozer 'add deps //test_expect_failure/missing_direct_deps/internal_deps:transitive_dependency' //$test_target"
 
   test_expect_failure_or_warning_on_missing_direct_deps_with_expected_message "$expected_message" $test_target ""
 }
@@ -215,23 +215,16 @@ test_scala_library_expect_failure_on_missing_direct_deps_warn_mode_java() {
   test_expect_failure_or_warning_on_missing_direct_deps_with_expected_message "${expected_message}" ${test_target} "--strict_java_deps=warn" "ne"
 }
 
-test_scala_library_expect_failure_on_missing_direct_deps_off_mode() {
-  expected_message="test_expect_failure/missing_direct_deps/internal_deps/A.scala:[0-9+]: error: not found: value C"
-  test_target='test_expect_failure/missing_direct_deps/internal_deps:transitive_dependency_user'
-
-  test_expect_failure_or_warning_on_missing_direct_deps_with_expected_message "${expected_message}" ${test_target} "--strict_java_deps=off"
-}
-
 test_scala_junit_test_can_fail() {
   action_should_fail test test_expect_failure/scala_junit_test:failing_test
 }
 
 test_repl() {
-  echo "import scalarules.test._; HelloLib.printMessage(\"foo\")" | bazel-bin/test/HelloLibRepl | grep "foo java" &&
-  echo "import scalarules.test._; TestUtil.foo" | bazel-bin/test/HelloLibTestRepl | grep "bar" &&
-  echo "import scalarules.test._; ScalaLibBinary.main(Array())" | bazel-bin/test/ScalaLibBinaryRepl | grep "A hui hou" &&
-  echo "import scalarules.test._; ResourcesStripScalaBinary.main(Array())" | bazel-bin/test/ResourcesStripScalaBinaryRepl | grep "More Hello"
-  echo "import scalarules.test._; A.main(Array())" | bazel-bin/test/ReplWithSources | grep "4 8 15"
+  echo "import scalarules.test._; HelloLib.printMessage(\"foo\")" | "$bazel_info_bin/"test/HelloLibRepl | grep "foo java" &&
+  echo "import scalarules.test._; TestUtil.foo" | "$bazel_info_bin/"test/HelloLibTestRepl | grep "bar" &&
+  echo "import scalarules.test._; ScalaLibBinary.main(Array())" | "$bazel_info_bin/"test/ScalaLibBinaryRepl | grep "A hui hou" &&
+  echo "import scalarules.test._; ResourcesStripScalaBinary.main(Array())" | "$bazel_info_bin/"test/ResourcesStripScalaBinaryRepl | grep "More Hello"
+  echo "import scalarules.test._; A.main(Array())" | "$bazel_info_bin/"test/ReplWithSources | grep "4 8 15"
 }
 
 test_benchmark_jmh() {
@@ -248,7 +241,7 @@ test_multi_service_manifest() {
   deploy_jar='ScalaBinary_with_service_manifest_srcs_deploy.jar'
   meta_file='META-INF/services/org.apache.beam.sdk.io.FileSystemRegistrar'
   bazel build test:$deploy_jar
-  unzip -p bazel-bin/test/$deploy_jar $meta_file > service_manifest.txt
+  unzip -p "$bazel_info_bin/"test/$deploy_jar $meta_file > service_manifest.txt
   diff service_manifest.txt test/example_jars/expected_service_manifest.txt
   RESPONSE_CODE=$?
   rm service_manifest.txt
@@ -290,13 +283,13 @@ action_should_fail_with_message() {
 }
 
 xmllint_test() {
-  find -L ./bazel-testlogs -iname "*.xml" | xargs -n1 xmllint > /dev/null
+  find -L "$bazel_info_testlogs" -iname "*.xml" | xargs -n1 xmllint > /dev/null
 }
 
 multiple_junit_suffixes() {
   bazel test //test:JunitMultipleSuffixes
 
-  matches=$(grep -c -e 'Discovered classes' -e 'scalarules.test.junit.JunitSuffixIT' -e 'scalarules.test.junit.JunitSuffixE2E' ./bazel-testlogs/test/JunitMultipleSuffixes/test.log)
+  matches=$(grep -c -e 'Discovered classes' -e 'scalarules.test.junit.JunitSuffixIT' -e 'scalarules.test.junit.JunitSuffixE2E' "$bazel_info_testlogs"/test/JunitMultipleSuffixes/test.log)
   if [ $matches -eq 3 ]; then
     return 0
   else
@@ -307,7 +300,7 @@ multiple_junit_suffixes() {
 multiple_junit_prefixes() {
   bazel test //test:JunitMultiplePrefixes
 
-  matches=$(grep -c -e 'Discovered classes' -e 'scalarules.test.junit.TestJunitCustomPrefix' -e 'scalarules.test.junit.OtherCustomPrefixJunit' ./bazel-testlogs/test/JunitMultiplePrefixes/test.log)
+  matches=$(grep -c -e 'Discovered classes' -e 'scalarules.test.junit.TestJunitCustomPrefix' -e 'scalarules.test.junit.OtherCustomPrefixJunit' "$bazel_info_testlogs"/test/JunitMultiplePrefixes/test.log)
   if [ $matches -eq 3 ]; then
     return 0
   else
@@ -317,7 +310,7 @@ multiple_junit_prefixes() {
 
 multiple_junit_patterns() {
   bazel test //test:JunitPrefixesAndSuffixes
-  matches=$(grep -c -e 'Discovered classes' -e 'scalarules.test.junit.TestJunitCustomPrefix' -e 'scalarules.test.junit.JunitSuffixE2E' ./bazel-testlogs/test/JunitPrefixesAndSuffixes/test.log)
+  matches=$(grep -c -e 'Discovered classes' -e 'scalarules.test.junit.TestJunitCustomPrefix' -e 'scalarules.test.junit.JunitSuffixE2E' "$bazel_info_testlogs"/test/JunitPrefixesAndSuffixes/test.log)
   if [ $matches -eq 3 ]; then
     return 0
   else
@@ -327,7 +320,7 @@ multiple_junit_patterns() {
 
 junit_generates_xml_logs() {
   bazel test //test:JunitTestWithDeps
-  matches=$(grep -c -e "testcase name='hasCompileTimeDependencies'" -e "testcase name='hasRuntimeDependencies'" ./bazel-testlogs/test/JunitTestWithDeps/test.xml)
+  matches=$(grep -c -e "testcase name='hasCompileTimeDependencies'" -e "testcase name='hasRuntimeDependencies'" "$bazel_info_testlogs"/test/JunitTestWithDeps/test.xml)
   if [ $matches -eq 2 ]; then
     return 0
   else
@@ -347,7 +340,7 @@ test_junit_test_errors_when_no_tests_found() {
 test_resources() {
   RESOURCE_NAME="resource.txt"
   TARGET=$1
-  OUTPUT_JAR="bazel-bin/test/src/main/scala/scalarules/test/resources/$TARGET.jar"
+  OUTPUT_JAR="$bazel_info_bin/test/src/main/scala/scalarules/test/resources/$TARGET.jar"
   FULL_TARGET="test/src/main/scala/scalarules/test/resources/$TARGET.jar"
   bazel build $FULL_TARGET
   jar tf $OUTPUT_JAR | grep $RESOURCE_NAME
@@ -769,7 +762,7 @@ test_scala_import_expect_failure_on_missing_direct_deps_warn_mode() {
   local expected_message1="buildozer 'add deps $dependency_target1' //$test_target"
   local expected_message2="buildozer 'add deps $dependency_target2' //$test_target"
 
-  test_expect_failure_or_warning_on_missing_direct_deps_with_expected_message "${expected_message1}" ${test_target} "--strict_java_deps=warn" "ne" "${expected_message2}"
+  test_expect_failure_or_warning_on_missing_direct_deps_with_expected_message "${expected_message1}" ${test_target} "--strict_java_deps=error" "eq" "${expected_message2}"
 }
 
 test_scalaopts_from_scala_toolchain() {
@@ -938,6 +931,8 @@ dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./test_runner.sh
 . "${dir}"/test_runner.sh
 runner=$(get_test_runner "${1:-local}")
+bazel_info_testlogs="$(bazel info bazel-testlogs)"
+bazel_info_bin="$(bazel info bazel-bin)"
 
 $runner bazel build test/...
 #$runner bazel build "test/... --all_incompatible_changes"
@@ -948,7 +943,7 @@ $runner bazel build "--strict_java_deps=ERROR -- test/... -test:UnusedDependency
 #$runner bazel build "--strict_java_deps=ERROR --all_incompatible_changes -- test/... -test:UnusedDependencyChecker"
 $runner bazel test "--strict_java_deps=ERROR -- test/... -test:UnusedDependencyChecker"
 $runner test_disappearing_class
-$runner find -L ./bazel-testlogs -iname "*.xml"
+$runner find -L "$bazel_info_testlogs" -iname "*.xml"
 $runner xmllint_test
 $runner test_transitive_deps
 $runner test_scala_library_suite
@@ -974,8 +969,8 @@ $runner scala_specs2_junit_test_test_filter_exact_match
 $runner scala_specs2_junit_test_test_filter_exact_match_unsafe_characters
 $runner scala_specs2_junit_test_test_filter_exact_match_escaped_and_sanitized
 $runner scala_specs2_junit_test_test_filter_match_multiple_methods
-$runner scala_specs2_exception_in_initializer_without_filter
-$runner scala_specs2_exception_in_initializer_terminates_without_timeout
+#$runner scala_specs2_exception_in_initializer_without_filter
+#$runner scala_specs2_exception_in_initializer_terminates_without_timeout
 $runner scalac_jvm_flags_are_configured
 $runner javac_jvm_flags_are_configured
 $runner javac_jvm_flags_via_javacopts_are_configured
@@ -989,7 +984,6 @@ $runner test_scala_library_expect_failure_on_missing_direct_deps_strict_is_disab
 $runner test_scala_binary_expect_failure_on_missing_direct_deps
 $runner test_scala_binary_expect_failure_on_missing_direct_deps_located_in_dependency_which_is_scala_binary
 $runner test_scala_library_expect_failure_on_missing_direct_deps_warn_mode
-$runner test_scala_library_expect_failure_on_missing_direct_deps_off_mode
 $runner test_unused_dependency_checker_mode_from_scala_toolchain
 $runner test_unused_dependency_checker_mode_set_in_rule
 $runner test_unused_dependency_checker_mode_override_toolchain
@@ -999,9 +993,7 @@ $runner test_scala_library_expect_no_recompilation_on_internal_change_of_scala_d
 $runner test_scala_library_expect_no_recompilation_on_internal_change_of_java_dependency
 $runner test_scala_library_expect_no_java_recompilation_on_internal_change_of_scala_sibling
 $runner test_scala_library_expect_failure_on_missing_direct_java
-$runner test_scala_library_expect_failure_on_java_in_src_jar_when_disabled
 $runner test_scala_library_expect_failure_on_missing_direct_deps_warn_mode_java
-$runner test_scala_library_expect_better_failure_message_on_missing_transitive_dependency_labels_from_other_jvm_rules
 $runner test_scala_import_expect_failure_on_missing_direct_deps_warn_mode
 $runner bazel build "test_expect_failure/missing_direct_deps/internal_deps/... --strict_java_deps=warn"
 $runner test_scalaopts_from_scala_toolchain
