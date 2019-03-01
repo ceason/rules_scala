@@ -20,46 +20,29 @@ _AspectInfo = provider(
 # ':' is reserved & therefore won't collide
 _LABEL_DELIMITER = "::"
 
-# Returns mapping between labels in 'deps' and labels which those deps export.
-def _collect_deps_enforcer_info(ctx):
-    # aliased_labels
-    transitive_aliased_labels = []
-    direct_aliased_labels = []
-    for t in getattr(ctx.rule.attr, "exports", []):
-        if _AspectInfo in t:
-            transitive_aliased_labels += [t[_AspectInfo].aliased_labels]
-        if JavaInfo in t:
-            direct_aliased_labels += [str(t.label)]
-    if ctx.rule.kind in [
-        # needed to map the labels coming out of aspect-produced jars
-        #  to the rule that puts them in the dependency graph.
-        "scrooge_scala_library",
-        "java_proto_library",
-        "scalapb_proto_library",
-    ]:
-        for t in getattr(ctx.rule.attr, "deps", []):
-            direct_aliased_labels += [str(t.label)]
-    aliased_labels = depset(
-        order = "topological",
-        direct = [_LABEL_DELIMITER.join(
-            [str(ctx.label)] + sorted(direct_aliased_labels),
-        )] if direct_aliased_labels else [],
-        transitive = transitive_aliased_labels,
-    )
+def _default_unused_deps(ctx):
+    # use rule-configured setting (if present)
+    if getattr(ctx.attr, "unused_dependency_checker_mode", None):
+        return ctx.attr.unused_dependency_checker_mode
 
-    # direct_jars_from_exports
-    transitive_direct_jars = []
-    for t in getattr(ctx.rule.attr, "exports", []):
-        if JavaInfo in t:
-            transitive_direct_jars += [t[JavaInfo].compile_jars]
-        if _AspectInfo in t:
-            transitive_direct_jars += [t[_AspectInfo].direct_jars_from_exports]
-    direct_jars_from_exports = depset(transitive = transitive_direct_jars)
+    # "--define unused_scala_deps=..." flag
+    if "unused_scala_deps" in ctx.var:
+        return ctx.var["unused_scala_deps"]
 
-    return _AspectInfo(
-        direct_jars_from_exports = direct_jars_from_exports,
-        aliased_labels = aliased_labels,
-    )
+    # fall back to toolchain default
+    tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
+    return tc.unused_dependency_checker_mode
+
+def _default_strict_deps(ctx):
+    # "--define strict_scala_deps=..." flag takes precedence
+    if "strict_scala_deps" in ctx.var:
+        return ctx.var["strict_scala_deps"]
+
+    # fall back to strict java deps setting
+    if (ctx.fragments.java.strict_java_deps and
+        ctx.fragments.java.strict_java_deps != "default"):
+        return ctx.fragments.java.strict_java_deps
+    return "error"
 
 def _get_jdeps_config(
         ctx,
@@ -107,38 +90,70 @@ def _get_jdeps_config(
         ]),
     )
 
-def _impl(target, ctx):
-    info = _collect_deps_enforcer_info(ctx)
+def _aspect_impl(target, ctx):
+    # aliased_labels
+    direct_aliased_labels = []
+    exports_aliased_labels = []
+    deps_aliased_labels = [
+        t[_AspectInfo].aliased_labels
+        for t in getattr(ctx.rule.attr, "deps", [])
+        if _AspectInfo in t
+    ]
+    for t in getattr(ctx.rule.attr, "exports", []):
+        if _AspectInfo in t:
+            exports_aliased_labels += [t[_AspectInfo].aliased_labels]
+        if JavaInfo in t:
+            direct_aliased_labels += [str(t.label)]
+    if ctx.rule.kind in [
+        # needed to map the labels coming out of aspect-produced jars
+        #  to the rule that puts them in the dependency graph.
+        "scrooge_scala_library",
+        "java_proto_library",
+        "scalapb_proto_library",
+    ]:
+        for t in getattr(ctx.rule.attr, "deps", []):
+            direct_aliased_labels += [str(t.label)]
+    aliased_labels_order = "topological"
+    aliased_labels = depset(
+        order = aliased_labels_order,
+        direct = [_LABEL_DELIMITER.join(
+            [str(ctx.label)] + sorted(direct_aliased_labels),
+        )] if direct_aliased_labels else [],
+        transitive = exports_aliased_labels + [depset(
+            # We put this in its own depset to maintain the topology
+            #  (ie 'deps' are further away than 'exports')
+            order = aliased_labels_order,
+            transitive = deps_aliased_labels,
+        )],
+    )
+
+    # direct_jars_from_exports
+    transitive_direct_jars = []
+    for t in getattr(ctx.rule.attr, "exports", []):
+        if JavaInfo in t:
+            transitive_direct_jars += [t[JavaInfo].compile_jars]
+        if _AspectInfo in t:
+            transitive_direct_jars += [t[_AspectInfo].direct_jars_from_exports]
+    if ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"].plus_one_deps_mode == "on":
+        transitive_direct_jars += [
+            t[JavaInfo].compile_jars
+            for t
+            in getattr(ctx.rule.attr, "deps", [])
+            if JavaInfo in t
+        ]
+    direct_jars_from_exports = depset(transitive = transitive_direct_jars)
+
+    info = _AspectInfo(
+        direct_jars_from_exports = direct_jars_from_exports,
+        aliased_labels = aliased_labels,
+    )
     return [info]
 
 jdeps_enforcer_aspect = aspect(
-    _impl,
+    _aspect_impl,
     attr_aspects = ["deps", "exports"],
+    toolchains = ["@io_bazel_rules_scala//scala:toolchain_type"],
 )
-
-def _default_unused_deps(ctx):
-    # "--define unused_scala_deps=..." flag takes precedence
-    if "unused_scala_deps" in ctx.var:
-        return ctx.var["unused_scala_deps"]
-
-    # otherwise use rule-configured setting (if present)
-    if getattr(ctx.attr, "unused_dependency_checker_mode", None):
-        return ctx.attr.unused_dependency_checker_mode
-
-    # fall back to toolchain default
-    tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
-    return tc.unused_dependency_checker_mode
-
-def _default_strict_deps(ctx):
-    # "--define strict_scala_deps=..." flag takes precedence
-    if "strict_scala_deps" in ctx.var:
-        return ctx.var["strict_scala_deps"]
-
-    # fall back to strict java deps setting
-    if (ctx.fragments.java.strict_java_deps and
-        ctx.fragments.java.strict_java_deps != "default"):
-        return ctx.fragments.java.strict_java_deps
-    return "off"
 
 def has_jdeps_plugin(ctx):
     return hasattr(ctx.attr, "_scalac_jdeps_plugin")

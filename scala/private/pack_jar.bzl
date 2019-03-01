@@ -46,8 +46,11 @@ def pack_jar(
         classpath_resources = [],
         jars = [],  # (resource jars *and* compilation output jars)
 
-        # depset[File]
-        transitive_jars = None):
+        # list[depset[File]]
+        transitive_jars = [],
+
+        # list[depset[File]] - only used for creating edges in the action graph
+        unused_action_inputs = []):
     if not output:
         fail("Must provide 'output' kwarg")
 
@@ -69,7 +72,7 @@ def pack_jar(
     args.add_all("--classpath_resources", classpath_resources)
     input_jars = depset(
         direct = jars,
-        transitive = [transitive_jars] if transitive_jars else [],
+        transitive = transitive_jars,
     )
     args.add_all("--sources", input_jars)
     args.add_all("--resources", [
@@ -80,7 +83,7 @@ def pack_jar(
     ctx.actions.run(
         inputs = depset(
             direct = resources + classpath_resources,
-            transitive = [input_jars],
+            transitive = [input_jars] + unused_action_inputs,
         ),
         outputs = [output],
         executable = ctx.executable._singlejar,

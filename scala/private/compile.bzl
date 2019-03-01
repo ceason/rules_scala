@@ -46,6 +46,7 @@ def scalac(
         args.add("--print_compile_time")
 
     # scalacopts
+    args.add_all("--scalac_opts", tc.scalacopts)
     args.add_all("--scalac_opts", scalac_opts)
 
     # classpath
@@ -146,9 +147,6 @@ def compile(
         # File
         output = None,
         output_statsfile = None,
-
-        # list[String]
-        scalac_opts = [],
 
         # list[File]
         resource_jars = [],

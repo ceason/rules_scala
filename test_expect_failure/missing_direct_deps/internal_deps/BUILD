@@ -44,7 +44,7 @@ scala_library(
 
 custom_jvm(
     name = "direct_java_provider_dependency",
-    deps = ["transitive_dependency"],
+    exports = ["transitive_dependency"],
 )
 
 scala_binary(
@@ -72,6 +72,7 @@ scala_binary(
     ],
     main_class = "D",
     deps = ["direct_binary_dependency"],
+    tags = ["manual"],
 )
 
 java_library(

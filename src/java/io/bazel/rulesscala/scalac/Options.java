@@ -16,27 +16,27 @@ public class Options {
   private String[] originalArgs;
 
 
-  protected Options(List<String> args) {
+  public Options(List<String> args) {
     this.args = new LinkedList<>(args);
     originalArgs = args.toArray(new String[0]);
   }
 
-  protected RuntimeException unrecognizedFlagException() {
+  public RuntimeException unrecognizedFlagException() {
     return new RuntimeException(String.format(""
             + "Unrecognized argument '%s' in args:\n  %s",
         currentFlag, String.join("\n  ", args)));
   }
 
-  protected boolean hasMoreFlags() {
+  public boolean hasMoreFlags() {
     return !args.isEmpty();
   }
 
-  protected String nextFlag() {
+  public String nextFlag() {
     currentFlag = args.remove();
     return currentFlag;
   }
 
-  protected String getValue() {
+  public String getValue() {
     String v = args.remove();
     if (!args.isEmpty() && !args.peek().startsWith("--")) {
       throw new IllegalArgumentException(
@@ -46,11 +46,11 @@ public class Options {
     return v;
   }
 
-  protected List<String> getList() {
+  public List<String> getList() {
     return getList(null);
   }
 
-  protected List<String> getList(String splitStr) {
+  public List<String> getList(String splitStr) {
     List<String> r = new ArrayList<String>();
     while (!args.isEmpty() && !args.peek().startsWith("--")) {
       String item = args.remove();

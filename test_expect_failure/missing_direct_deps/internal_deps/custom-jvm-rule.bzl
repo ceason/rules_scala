@@ -1,6 +1,6 @@
 def _custom_jvm_impl(ctx):
     print(ctx.label)
-    transitive_compile_jars = _collect(ctx.attr.deps)
+    transitive_compile_jars = _collect(ctx.attr.exports)
     return struct(
         providers = [
             java_common.create_provider(
@@ -18,6 +18,6 @@ def _collect(deps):
 custom_jvm = rule(
     implementation = _custom_jvm_impl,
     attrs = {
-        "deps": attr.label_list(),
+        "exports": attr.label_list(),
     },
 )

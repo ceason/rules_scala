@@ -5,8 +5,10 @@ import com.google.devtools.build.lib.view.proto.Deps.Dependency;
 import com.google.devtools.build.lib.view.proto.Deps.Dependency.Kind;
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -18,7 +20,7 @@ import java.util.stream.Stream;
 /**
  * Enforces strict/unused deps
  */
-public class JdepsEnforcer extends Options {
+public class JdepsEnforcer {
 
   enum EnforcementMode {OFF, ERROR, WARN}
 
@@ -34,46 +36,33 @@ public class JdepsEnforcer extends Options {
   String currentTarget;
 
   JdepsEnforcer(Dependencies jdeps, List<String> args) {
-    super(args);
-    while (hasMoreFlags()) {
-      switch (nextFlag()) {
+    Options o = new Options(args);
+    LinkedList<String> aliasedLabels = new LinkedList<>();
+    while (o.hasMoreFlags()) {
+      switch (o.nextFlag()) {
         case "--strict_deps_mode":
-          strictDeps = EnforcementMode.valueOf(getValue().toUpperCase());
+          strictDeps = EnforcementMode.valueOf(o.getValue().toUpperCase());
           break;
         case "--unused_deps_mode":
-          unusedDeps = EnforcementMode.valueOf(getValue().toUpperCase());
+          unusedDeps = EnforcementMode.valueOf(o.getValue().toUpperCase());
           break;
         case "--unused_deps_ignored_labels":
-          unusedDepsIgnoredLabels.addAll(getList("::"));
+          unusedDepsIgnoredLabels.addAll(o.getList("::"));
           break;
         case "--direct_labels":
-          directLabels.addAll(getList("::"));
+          directLabels.addAll(o.getList("::"));
           break;
         case "--strict_deps_ignored_jars":
-          strictDepsIgnoredJars.addAll(getList(File.pathSeparator));
+          strictDepsIgnoredJars.addAll(o.getList(File.pathSeparator));
           break;
         case "--direct_jars":
-          directJars.addAll(getList(File.pathSeparator));
+          directJars.addAll(o.getList(File.pathSeparator));
           break;
         case "--aliased_labels":
-          String[] parts = getValue().split("::");
-          if (!(parts.length > 1)) {
-            throw new IllegalArgumentException(String.format(
-                "Flag --aliased_labels wanted > 1 '::' delimited values but got '%s'",
-                String.join("::", parts)));
-          }
-          String alias = parts[0];
-          for (int i = 1; i < parts.length; i++) {
-            String label = parts[i];
-            if (!aliasesByLabel.containsKey(label)) {
-              aliasesByLabel.put(label, new HashSet<>());
-            }
-            aliasesByLabel.get(label).add(alias);
-            suggestedDepByLabel.putIfAbsent(label, alias);
-          }
+          aliasedLabels.add(o.getValue());
           break;
         default:
-          throw unrecognizedFlagException();
+          throw o.unrecognizedFlagException();
       }
     }
     currentTarget = jdeps.getRuleLabel();
@@ -81,29 +70,90 @@ public class JdepsEnforcer extends Options {
         .filter(d -> d.getKind() == Kind.EXPLICIT)
         .map(Dependency::getPath)
         .collect(Collectors.toSet());
+    // consume aliased labels in reverse (topological) order, which allows "nearer"
+    // aliases to override/propagate to "farther" ones.
+    while(!aliasedLabels.isEmpty()) {
+      String[] parts = aliasedLabels.removeLast().split("::");
+      if (!(parts.length > 1)) {
+        throw new IllegalArgumentException(String.format(
+            "Flag --aliased_labels wanted > 1 '::' delimited values but got '%s'",
+            String.join("::", parts)));
+      }
+      String alias = parts[0].intern();
+      String suggestedDep = suggestedDepByLabel.getOrDefault(alias, alias);
+      Set<String> extraAliases = aliasesByLabel.getOrDefault(alias, Collections.emptySet());
+      for (int i = 1; i < parts.length; i++) {
+        String label = parts[i].intern();
+        suggestedDepByLabel.putIfAbsent(label, suggestedDep);
+        if (!aliasesByLabel.containsKey(label)) {
+          aliasesByLabel.put(label, new HashSet<>());
+        }
+        Set<String> aliases = aliasesByLabel.get(label);
+        aliases.add(alias);
+        aliases.addAll(extraAliases);
+      }
+    }
   }
 
   List<String> getViolatingUnusedDeps() {
-    return directJars.stream()
-        .filter(not(usedJars::contains))     // = unused direct jars
-        .filter(this::jarHasClassfiles)
-        .map(this::getLabelFromJar)          // = "maybe" unused-direct labels
-        .filter(not(directLabels::contains))
-        .filter(not(this::isDirectViaAlias)) // = actual unused labels
-        .flatMap(this::labelWithAllAliases)  // ..including their aliases
-        .filter(directLabels::contains)      // filtered by what is actually specified in `deps`
-        .map(target -> (
-                "Target '{target}' is specified as a dependency to {currentTarget} but isn't used, please remove it from the deps.\n"
-                    + "You can use the following buildozer command:\n"
-                    + "buildozer 'remove deps {target}' {currentTarget}"
-                    + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
-                    + "\nDIRECT_LABELS:\n  " + directLabels.stream().sorted().collect(Collectors.joining("\n  "))
-                    + "\nIGNORED_LABELS:\n  " + unusedDepsIgnoredLabels.stream().sorted().collect(Collectors.joining("\n  "))
-            )
-                .replace("{target}", target)
-                .replace("{currentTarget}", currentTarget)
-        )
-        .collect(Collectors.toList());
+    Set<String> directUsedLabels = usedJars.stream()
+        .filter(directJars::contains)
+        .map(this::getLabelFromJar)
+        .flatMap(this::labelWithAllAliases)
+        .filter(directLabels::contains)
+        .collect(Collectors.toSet());
+    Set<String> unusedLabels = new HashSet<>();
+    for (String label : directLabels) {
+      Set<String> aliases = aliasesByLabel.getOrDefault(label, Collections.emptySet());
+      // label is only unused if it's not used or ignored
+      if (!directUsedLabels.contains(label) &&
+          !unusedDepsIgnoredLabels.contains(label) &&
+          // AND none of its aliases are used or ignored either
+          Collections.disjoint(aliases, unusedDepsIgnoredLabels) &&
+          Collections.disjoint(aliases, directUsedLabels)) {
+        unusedLabels.add(label);
+      }
+    }
+//    Set<String> wtf = usedJars.stream()
+//        .map(this::getLabelFromJar)
+//        .collect(Collectors.toSet());
+//    Set<String> wtf2 = usedJars.stream()
+//        .map(this::getLabelFromJar)
+//        .flatMap(this::labelWithAllAliases)
+//        .collect(Collectors.toSet());
+//    if (currentTarget.equals("//test/src/main/scala/scalarules/test/twitter_scrooge:justscrooges")) {
+//      return Arrays.asList("its the thing!!!!!"
+//    + "\nSTRICT_MODE: " + strictDeps.toString()
+//        + "\nUNUSED_MODE: " + unusedDeps.toString()
+//        + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
+//        + "\nDIRECT_JARS:\n  " + directJars.stream().sorted().collect(Collectors.joining("\n  "))
+//        + "\nDIRECT_LABELS:\n  " + directLabels.stream().sorted().collect(Collectors.joining("\n  "))
+//        + "\nIGNORED_LABELS:\n  " + unusedDepsIgnoredLabels.stream().sorted().collect(Collectors.joining("\n  "))
+//        + "\nALIASED_LABELS:\n  " + aliasesByLabel.keySet().stream().sorted().map(k -> String.format("%s => %s", k, aliasesByLabel.get(k))).collect(Collectors.joining("\n  "))
+//        + "\nDIRECT_USED_LABELS:\n  " + directUsedLabels.stream().sorted().collect(Collectors.joining("\n  "))
+//        + "\nUNUSED_LABELS:\n  " + unusedLabels.stream().sorted().collect(Collectors.joining("\n  "))
+//          + "\nWTF:\n  " + wtf.stream().sorted().collect(Collectors.joining("\n  "))
+//          + "\nWTF2:\n  " + wtf2.stream().sorted().collect(Collectors.joining("\n  ")));
+//
+//    }
+
+    return unusedLabels.stream().map(target -> (
+          "Target '{target}' is specified as a dependency to {currentTarget} but isn't used, please remove it from the deps.\n"
+              + "You can use the following buildozer command:\n"
+              + "buildozer 'remove deps {target}' {currentTarget}"
+              + "\nSTRICT_MODE: " + strictDeps.toString()
+              + "\nUNUSED_MODE: " + unusedDeps.toString()
+              + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
+              + "\nDIRECT_JARS:\n  " + directJars.stream().sorted().collect(Collectors.joining("\n  "))
+              + "\nDIRECT_LABELS:\n  " + directLabels.stream().sorted().collect(Collectors.joining("\n  "))
+              + "\nIGNORED_LABELS:\n  " + unusedDepsIgnoredLabels.stream().sorted().collect(Collectors.joining("\n  "))
+              + "\nALIASED_LABELS:\n  " + aliasesByLabel.keySet().stream().sorted().map(k -> String.format("%s => %s", k, aliasesByLabel.get(k))).collect(Collectors.joining("\n  "))
+              + "\nDIRECT_USED_LABELS:\n  " + directUsedLabels.stream().sorted().collect(Collectors.joining("\n  "))
+              + "\nUNUSED_LABELS:\n  " + unusedLabels.stream().sorted().collect(Collectors.joining("\n  "))
+      )
+          .replace("{target}", target)
+          .replace("{currentTarget}", currentTarget)
+      ).collect(Collectors.toList());
   }
 
   List<String> getViolatingStrictDeps() {
@@ -122,6 +172,7 @@ public class JdepsEnforcer extends Options {
                     + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
                     + "\nIGNORED_JARS:\n  " + strictDepsIgnoredJars.stream().sorted().collect(Collectors.joining("\n  "))
                     + "\nDIRECT_JARS:\n  " + directJars.stream().sorted().collect(Collectors.joining("\n  "))
+                    + "\nALIASED_LABELS:\n  " + aliasesByLabel.keySet().stream().sorted().map(k -> String.format("%s => %s", k, aliasesByLabel.get(k))).collect(Collectors.joining("\n  "))
             )
                 .replace("{target}", target)
                 .replace("{currentTarget}", currentTarget)
@@ -143,35 +194,11 @@ public class JdepsEnforcer extends Options {
     }
   }
 
-  boolean jarHasClassfiles(String jarPath) {
-    try (JarFile jar = new JarFile(jarPath)) {
-      return jar.stream()
-          .anyMatch(f -> f.getName().endsWith(".class"));
-    } catch (IOException e) {
-      throw new RuntimeException("Couldn't open " + jarPath, e);
-    }
-  }
-
-  boolean isDirectViaAlias(String label) {
-    // for each alias of my label, see if 'usedLabels' contains..
-    if (aliasesByLabel.containsKey(label)) {
-      for (String alias : aliasesByLabel.get(label)) {
-        if (directLabels.contains(alias)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
 
   Stream<String> labelWithAllAliases(String label) {
-    if (aliasesByLabel.containsKey(label)) {
-      return Stream.concat(
-          Stream.of(label),
-          aliasesByLabel.get(label).stream());
-    } else {
-      return Stream.of(label);
-    }
+    return Stream.concat(
+        Stream.of(label),
+        aliasesByLabel.getOrDefault(label, Collections.emptySet()).stream());
   }
 
   String suggestAddDepLabel(String label) {

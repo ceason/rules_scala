@@ -1,4 +1,4 @@
-load(":compile.bzl", "compile", "scalac")
+load(":compile.bzl", "compile")
 load(":pack_jar.bzl", "pack_jar")
 load(":launcher.bzl", "launcher")
 
@@ -35,7 +35,6 @@ def impl_helper(
         # bool
         use_ijar = False):
     tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
-
     source_files = []
     source_jars = []
     for f in getattr(ctx.files, "srcs", []) + extra_srcs:
@@ -73,7 +72,7 @@ def impl_helper(
             resource_strip_prefix = getattr(ctx.attr, "resource_strip_prefix", ""),
             resources = getattr(ctx.files, "resources", []),
             classpath_resources = getattr(ctx.files, "classpath_resources", []),
-            use_ijar = use_ijar
+            use_ijar = use_ijar,
         )
     elif resource_jars or resources or classpath_resources:
         # there are only resources, so pack them into a jar
@@ -85,6 +84,8 @@ def impl_helper(
             classpath_resources = classpath_resources,
             jars = resource_jars,
             resource_strip_prefix = resource_strip_prefix,
+            # maintain build-time dependency on compile jars (even though we're not compiling)
+            unused_action_inputs = [d.transitive_compile_time_jars for d in deps],
         )
         ctx.actions.write(output_statsfile, "")
         java_info = JavaInfo(
@@ -96,9 +97,13 @@ def impl_helper(
         )
     else:
         # there's no content for the jar, so make an empty jar
-        pack_jar(ctx, output = output_jar, deploy_manifest_lines = [
-            "Target-Label: %s" % str(ctx.label),
-        ])
+        pack_jar(
+            ctx,
+            output = output_jar,
+            deploy_manifest_lines = ["Target-Label: %s" % str(ctx.label)],
+            # maintain build-time dependency on compile jars (even though we're not compiling)
+            unused_action_inputs = [d.transitive_compile_time_jars for d in deps],
+        )
         ctx.actions.write(output_statsfile, "")
         java_info = JavaInfo(
             output_jar = output_jar,
@@ -108,6 +113,8 @@ def impl_helper(
             exports = exports,
         )
 
+    #
+
     # TODO: migration for non-JavaInfo plugins
 
     # create the deploy jar
@@ -115,7 +122,7 @@ def impl_helper(
         pack_jar(
             ctx,
             output = output_deploy_jar,
-            transitive_jars = java_info.transitive_runtime_jars,
+            transitive_jars = [java_info.transitive_runtime_jars],
             main_class = main_class,
             compression = True,
         )
@@ -155,7 +162,6 @@ def impl_helper(
     )
     return struct(
         java = java_info,
-#        scala = _scala_provider_from(java_info, output_jar),
         scala = java_info,
         providers = [
             java_info,

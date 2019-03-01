@@ -53,7 +53,7 @@ def launcher(
     ctx.actions.write(
         output = wrapper,
         content = """#!/usr/bin/env bash
-{wrapper_preamble}{javabin} "$@" {args}
+{wrapper_preamble}"${{REAL_EXTERNAL_JAVABIN:-{javabin}}}" "$@" {args}
 """.format(
             wrapper_preamble = wrapper_preamble,
             javabin = javabin,
@@ -78,7 +78,7 @@ def launcher(
     args.add("%set_jacoco_java_runfiles_root%", "")
     args.add("%workspace_prefix%", ctx.workspace_name + "/")
     args.add("%java_start_class%", main_class)
-    args.add("%javabin%", "JAVABIN=%s/%s" % (
+    args.add("%javabin%", "export REAL_EXTERNAL_JAVABIN=${JAVABIN}; JAVABIN=%s/%s" % (
         _runfiles_root(ctx),
         wrapper.short_path,
     ))
