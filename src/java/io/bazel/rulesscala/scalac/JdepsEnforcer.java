@@ -5,6 +5,7 @@ import com.google.devtools.build.lib.view.proto.Deps.Dependency;
 import com.google.devtools.build.lib.view.proto.Deps.Dependency.Kind;
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -137,23 +138,27 @@ public class JdepsEnforcer {
 //
 //    }
 
-    return unusedLabels.stream().map(target -> (
-          "Target '{target}' is specified as a dependency to {currentTarget} but isn't used, please remove it from the deps.\n"
-              + "You can use the following buildozer command:\n"
-              + "buildozer 'remove deps {target}' {currentTarget}"
-              + "\nSTRICT_MODE: " + strictDeps.toString()
-              + "\nUNUSED_MODE: " + unusedDeps.toString()
-              + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
-              + "\nDIRECT_JARS:\n  " + directJars.stream().sorted().collect(Collectors.joining("\n  "))
-              + "\nDIRECT_LABELS:\n  " + directLabels.stream().sorted().collect(Collectors.joining("\n  "))
-              + "\nIGNORED_LABELS:\n  " + unusedDepsIgnoredLabels.stream().sorted().collect(Collectors.joining("\n  "))
-              + "\nALIASED_LABELS:\n  " + aliasesByLabel.keySet().stream().sorted().map(k -> String.format("%s => %s", k, aliasesByLabel.get(k))).collect(Collectors.joining("\n  "))
-              + "\nDIRECT_USED_LABELS:\n  " + directUsedLabels.stream().sorted().collect(Collectors.joining("\n  "))
-              + "\nUNUSED_LABELS:\n  " + unusedLabels.stream().sorted().collect(Collectors.joining("\n  "))
+    if (unusedLabels.size() == 0){
+      return Collections.emptyList();
+    } else {
+      String message = ("Unused dependencies found for {currentTarget}.\n"
+          + "You can use the following buildozer command to remove:\n"
+          + "buildozer 'remove deps {targets}' {currentTarget}"
+          + "\nSTRICT_MODE: " + strictDeps.toString()
+          + "\nUNUSED_MODE: " + unusedDeps.toString()
+//              + "\nUSED_JARS:\n  " + usedJars.stream().sorted().collect(Collectors.joining("\n  "))
+//              + "\nDIRECT_JARS:\n  " + directJars.stream().sorted().collect(Collectors.joining("\n  "))
+//              + "\nDIRECT_LABELS:\n  " + directLabels.stream().sorted().collect(Collectors.joining("\n  "))
+//              + "\nIGNORED_LABELS:\n  " + unusedDepsIgnoredLabels.stream().sorted().collect(Collectors.joining("\n  "))
+//              + "\nALIASED_LABELS:\n  " + aliasesByLabel.keySet().stream().sorted().map(k -> String.format("%s => %s", k, aliasesByLabel.get(k))).collect(Collectors.joining("\n  "))
+          + "\nDIRECT_USED_LABELS:\n  " + directUsedLabels.stream().sorted().collect(Collectors.joining("\n  "))
+          + "\nUNUSED_LABELS:\n  " + unusedLabels.stream().sorted().collect(Collectors.joining("\n  "))
       )
-          .replace("{target}", target)
-          .replace("{currentTarget}", currentTarget)
-      ).collect(Collectors.toList());
+          .replace("{targets}", unusedLabels.stream().sorted().collect(Collectors.joining(" ")))
+          .replace("{currentTarget}", currentTarget);
+      return Arrays.asList(message);
+    }
+
   }
 
   List<String> getViolatingStrictDeps() {
